@@ -1,0 +1,19 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '1.5.31'
+}
+
+group 'com.vishnumad'
+version '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+def PROCESSING_DIR = "/home/vishnu/Processing/processing-4.0b2"
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib"
+
+    // Processing Core
+    implementation fileTree("${PROCESSING_DIR}/core/library") { include "*.jar" }
+}
