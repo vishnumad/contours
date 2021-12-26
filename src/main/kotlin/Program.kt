@@ -2,12 +2,12 @@ import processing.core.PApplet
 import kotlin.math.abs
 
 const val spacing = 4
-const val noiseScale = 0.011f
-const val landThreshold = 0.55
+const val noiseScale = 0.0075f
+const val landThreshold = 0.45
 const val isolineInc = 0.012
 
 const val verticalBias = 0f
-const val elevationMultiplier = 250f
+const val elevationMultiplier = 200f
 
 const val bgColor = "fef0d9"
 const val outlineColor = "c0526e"
@@ -38,6 +38,7 @@ class Program : PApplet() {
     override fun draw() {
         background(bgColor)
 
+        // Position camera
         translate(width / 2f, height / 2f)
         rotateX(radians(65f))
         rotateZ(radians(45f))
@@ -97,7 +98,8 @@ class Program : PApplet() {
     }
 
     private fun elevation(x: Double, y: Double): Double {
-        return simplex(x * noiseScale, y * noiseScale)
+        return simplex(x * noiseScale + 150, y * noiseScale + 150)
+//        return noise((x * noiseScale + 150).toFloat(), (y * noiseScale + 150).toFloat()).toDouble()
     }
 
     private fun simplex(x: Double, y: Double): Double {
@@ -108,9 +110,16 @@ class Program : PApplet() {
         return left * (1.0f - x) + right * x
     }
 
+    // Draw contours using marching squares
+    // https://en.wikipedia.org/wiki/Marching_squares
     private fun drawContours(threshold: Double) {
-        val contour = createShape()
-        contour.beginShape(LINES)
+        val contourShape = createShape()
+        contourShape.beginShape(LINES)
+
+        val fillShape = createShape()
+        fillShape.beginShape(TRIANGLES)
+        fillShape.noStroke()
+        fill(fillShape, bgColor)
 
         for (_x in 0 until cols - 1) {
             for (_y in 0 until rows - 1) {
@@ -146,191 +155,269 @@ class Program : PApplet() {
                 val dx = x
                 val dy = mix(y, y + spacing, percentDA)
 
-                val orientation = binaryToDecimal(
-                    a = nw,
-                    b = ne,
-                    c = se,
-                    d = sw,
-                    threshold = threshold
-                )
-
+                // z axis values for vertices
                 val contourZ = (threshold * elevationMultiplier + verticalBias).toFloat()
                 val fillZ = contourZ - 1.5f
 
-                when (orientation) {
+                when (binaryToDecimal(a = nw, b = ne, c = se, d = sw, threshold = threshold)) {
                     0 -> {
                         // empty, don't fill
                     }
                     1 -> {
-                        fillShape {
+                        with(fillShape) {
                             vertex(cx, cy, fillZ)
                             vertex(dx, dy, fillZ)
                             vertex(x, y + spacing, fillZ)
                         }
 
-                        contour.vertex(cx, cy, contourZ)
-                        contour.vertex(dx, dy, contourZ)
+                        with(contourShape) {
+                            vertex(cx, cy, contourZ)
+                            vertex(dx, dy, contourZ)
+                        }
                     }
                     2 -> {
-                        fillShape {
+                        with(fillShape) {
                             vertex(bx, by, fillZ)
                             vertex(cx, cy, fillZ)
                             vertex(x + spacing, y + spacing, fillZ)
                         }
 
-                        contour.vertex(bx, by, contourZ)
-                        contour.vertex(cx, cy, contourZ)
+                        with(contourShape) {
+                            vertex(bx, by, contourZ)
+                            vertex(cx, cy, contourZ)
+                        }
                     }
                     3 -> {
-                        fillShape {
+                        with(fillShape) {
                             vertex(bx, by, fillZ)
                             vertex(dx, dy, fillZ)
                             vertex(x, y + spacing, fillZ)
+
+                            vertex(x, y + spacing, fillZ)
                             vertex(x + spacing, y + spacing, fillZ)
+                            vertex(bx, by, fillZ)
                         }
 
-                        contour.vertex(bx, by, contourZ)
-                        contour.vertex(dx, dy, contourZ)
+                        with(contourShape) {
+                            vertex(bx, by, contourZ)
+                            vertex(dx, dy, contourZ)
+                        }
                     }
                     4 -> {
-                        fillShape {
+                        with(fillShape) {
                             vertex(ax, ay, fillZ)
                             vertex(bx, by, fillZ)
                             vertex(x + spacing, y, fillZ)
                         }
 
-                        contour.vertex(ax, ay, contourZ)
-                        contour.vertex(bx, by, contourZ)
+                        with(contourShape) {
+                            vertex(ax, ay, contourZ)
+                            vertex(bx, by, contourZ)
+                        }
                     }
                     5 -> {
-                        fillShape {
-                            vertex(x + spacing, y, fillZ)
+                        with(fillShape) {
                             vertex(ax, ay, fillZ)
+                            vertex(bx, by, fillZ)
+                            vertex(x + spacing, y, fillZ)
+
+                            vertex(cx, cy, fillZ)
                             vertex(dx, dy, fillZ)
                             vertex(x, y + spacing, fillZ)
+
+                            vertex(cx, cy, fillZ)
+                            vertex(dx, dy, fillZ)
+                            vertex(ax, ay, fillZ)
+
                             vertex(cx, cy, fillZ)
                             vertex(bx, by, fillZ)
+                            vertex(ax, ay, fillZ)
                         }
 
-                        contour.vertex(ax, ay, contourZ)
-                        contour.vertex(dx, dy, contourZ)
-                        contour.vertex(bx, by, contourZ)
-                        contour.vertex(cx, cy, contourZ)
+                        with(contourShape) {
+                            vertex(ax, ay, contourZ)
+                            vertex(dx, dy, contourZ)
+                            vertex(bx, by, contourZ)
+                            vertex(cx, cy, contourZ)
+                        }
                     }
                     6 -> {
-                        fillShape {
+                        with(fillShape) {
                             vertex(ax, ay, fillZ)
                             vertex(cx, cy, fillZ)
                             vertex(x + spacing, y + spacing, fillZ)
+
+                            vertex(ax, ay, fillZ)
                             vertex(x + spacing, y, fillZ)
+                            vertex(x + spacing, y + spacing, fillZ)
                         }
 
-                        contour.vertex(ax, ay, contourZ)
-                        contour.vertex(cx, cy, contourZ)
+                        with(contourShape) {
+                            vertex(ax, ay, contourZ)
+                            vertex(cx, cy, contourZ)
+                        }
                     }
                     7 -> {
-                        fillShape {
+                        with(fillShape) {
                             vertex(ax, ay, fillZ)
+                            vertex(x + spacing, y, fillZ)
+                            vertex(x + spacing, y + spacing, fillZ)
+
                             vertex(dx, dy, fillZ)
                             vertex(x, y + spacing, fillZ)
                             vertex(x + spacing, y + spacing, fillZ)
-                            vertex(x + spacing, y, fillZ)
+
+                            vertex(ax, ay, fillZ)
+                            vertex(dx, dy, fillZ)
+                            vertex(x + spacing, y + spacing, fillZ)
                         }
 
-                        contour.vertex(ax, ay, contourZ)
-                        contour.vertex(dx, dy, contourZ)
+                        with(contourShape) {
+                            vertex(ax, ay, contourZ)
+                            vertex(dx, dy, contourZ)
+                        }
                     }
                     8 -> {
-                        fillShape {
+                        with(fillShape) {
                             vertex(ax, ay, fillZ)
                             vertex(dx, dy, fillZ)
                             vertex(x, y, fillZ)
                         }
 
-                        contour.vertex(ax, ay, contourZ)
-                        contour.vertex(dx, dy, contourZ)
+                        with(contourShape) {
+                            vertex(ax, ay, contourZ)
+                            vertex(dx, dy, contourZ)
+                        }
                     }
                     9 -> {
-                        fillShape {
+                        with(fillShape) {
+                            vertex(x, y, fillZ)
                             vertex(ax, ay, fillZ)
                             vertex(cx, cy, fillZ)
-                            vertex(x, y + spacing, fillZ)
+
                             vertex(x, y, fillZ)
+                            vertex(x, y + spacing, fillZ)
+                            vertex(cx, cy, fillZ)
                         }
 
-                        contour.vertex(ax, ay, contourZ)
-                        contour.vertex(cx, cy, contourZ)
+                        with(contourShape) {
+                            vertex(ax, ay, contourZ)
+                            vertex(cx, cy, contourZ)
+                        }
                     }
                     10 -> {
-                        fillShape {
+                        with(fillShape) {
                             vertex(x, y, fillZ)
                             vertex(ax, ay, fillZ)
+                            vertex(dx, dy, fillZ)
+
                             vertex(bx, by, fillZ)
-                            vertex(x + spacing, y + spacing, fillZ)
                             vertex(cx, cy, fillZ)
+                            vertex(x + spacing, y + spacing, fillZ)
+
+                            vertex(bx, by, fillZ)
+                            vertex(cx, cy, fillZ)
+                            vertex(dx, dy, fillZ)
+
+                            vertex(ax, ay, fillZ)
+                            vertex(bx, by, fillZ)
                             vertex(dx, dy, fillZ)
                         }
 
-                        contour.vertex(ax, ay, contourZ)
-                        contour.vertex(bx, by, contourZ)
-                        contour.vertex(cx, cy, contourZ)
-                        contour.vertex(dx, dy, contourZ)
+                        with(contourShape) {
+                            vertex(ax, ay, contourZ)
+                            vertex(bx, by, contourZ)
+                            vertex(cx, cy, contourZ)
+                            vertex(dx, dy, contourZ)
+                        }
                     }
                     11 -> {
-                        fillShape {
+                        with(fillShape) {
+                            vertex(x, y, fillZ)
+                            vertex(ax, ay, fillZ)
+                            vertex(x, y + spacing, fillZ)
+
+                            vertex(bx, by, fillZ)
+                            vertex(x + spacing, y + spacing, fillZ)
+                            vertex(x, y + spacing, fillZ)
+
                             vertex(ax, ay, fillZ)
                             vertex(bx, by, fillZ)
-                            vertex(x + spacing, y + spacing, fillZ)
                             vertex(x, y + spacing, fillZ)
-                            vertex(x, y, fillZ)
                         }
 
-                        contour.vertex(ax, ay, contourZ)
-                        contour.vertex(bx, by, contourZ)
+                        with(contourShape) {
+                            vertex(ax, ay, contourZ)
+                            vertex(bx, by, contourZ)
+                        }
                     }
                     12 -> {
-                        fillShape {
-                            vertex(bx, by, fillZ)
-                            vertex(dx, dy, fillZ)
+                        with(fillShape) {
                             vertex(x, y, fillZ)
                             vertex(x + spacing, y, fillZ)
+                            vertex(bx, by, fillZ)
+
+                            vertex(x, y, fillZ)
+                            vertex(dx, dy, fillZ)
+                            vertex(bx, by, fillZ)
                         }
 
-                        contour.vertex(bx, by, contourZ)
-                        contour.vertex(dx, dy, contourZ)
+                        with(contourShape) {
+                            vertex(bx, by, contourZ)
+                            vertex(dx, dy, contourZ)
+                        }
                     }
                     13 -> {
-                        fillShape {
-                            vertex(bx, by, fillZ)
-                            vertex(cx, cy, fillZ)
-                            vertex(x, y + spacing, fillZ)
+                        with(fillShape) {
                             vertex(x, y, fillZ)
                             vertex(x + spacing, y, fillZ)
+                            vertex(bx, by, fillZ)
+
+                            vertex(x, y, fillZ)
+                            vertex(x, y + spacing, fillZ)
+                            vertex(cx, cy, fillZ)
+
+                            vertex(bx, by, fillZ)
+                            vertex(cx, cy, fillZ)
+                            vertex(x, y, fillZ)
                         }
 
-                        contour.vertex(bx, by, contourZ)
-                        contour.vertex(cx, cy, contourZ)
+                        with(contourShape) {
+                            vertex(bx, by, contourZ)
+                            vertex(cx, cy, contourZ)
+                        }
                     }
                     14 -> {
-                        fillShape {
-                            vertex(cx, cy, fillZ)
+                        with(fillShape) {
                             vertex(dx, dy, fillZ)
                             vertex(x, y, fillZ)
                             vertex(x + spacing, y, fillZ)
+
+                            vertex(cx, cy, fillZ)
+                            vertex(x + spacing, y, fillZ)
                             vertex(x + spacing, y + spacing, fillZ)
+
+                            vertex(cx, cy, fillZ)
+                            vertex(dx, dy, fillZ)
+                            vertex(x + spacing, y, fillZ)
                         }
 
-                        contour.vertex(cx, cy, contourZ)
-                        contour.vertex(dx, dy, contourZ)
+                        with(contourShape) {
+                            vertex(cx, cy, contourZ)
+                            vertex(dx, dy, contourZ)
+                        }
                     }
                     15 -> {
                         // Saves some unnecessary draws
-                        if (abs(threshold - nw) < 0.03) {
-                            fillShape {
+                        if (abs(threshold - nw) < 0.025) {
+                            with(fillShape) {
                                 vertex(x, y, fillZ)
                                 vertex(x + spacing, y, fillZ)
                                 vertex(x + spacing, y + spacing, fillZ)
+
+                                vertex(x, y, fillZ)
                                 vertex(x, y + spacing, fillZ)
+                                vertex(x + spacing, y + spacing, fillZ)
                             }
                         }
                     }
@@ -338,8 +425,11 @@ class Program : PApplet() {
             }
         }
 
-        contour.endShape(CLOSE)
-        shape(contour)
+        fillShape.endShape(CLOSE)
+        shape(fillShape)
+
+        contourShape.endShape(CLOSE)
+        shape(contourShape)
     }
 
     private fun binaryToDecimal(a: Double, b: Double, c: Double, d: Double, threshold: Double): Int {
@@ -351,20 +441,12 @@ class Program : PApplet() {
         return aBit + bBit + cBit + dBit
     }
 
-    private inline fun fillShape(vertices: () -> Unit) {
-        push()
-        noStroke()
-        fill(bgColor)
-        beginShape()
-        vertices()
-        endShape(CLOSE)
-        pop()
-    }
-
     override fun keyPressed() {
         when (key) {
             'r' -> {
-                simplex = OpenSimplex2S(System.currentTimeMillis())
+                seed = System.currentTimeMillis()
+                simplex = OpenSimplex2S(seed)
+                noiseSeed(seed)
                 redraw()
             }
             's' -> {
