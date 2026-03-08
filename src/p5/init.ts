@@ -4,6 +4,7 @@ type InitParams = {
     setup?: () => void;
     draw?: () => void;
     windowResized?: () => void;
+    keyPressed?: () => void;
 }
 
 export function initP5(params: InitParams) {
