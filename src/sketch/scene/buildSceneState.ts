@@ -23,6 +23,20 @@ export type BuildSceneStateOptions = {
   createContourLayer: (threshold: number) => SceneState['contourLayers'][number];
 };
 
+export function createContourThresholds(maxElevation: number, config: SketchConfig) {
+  const contourThresholds: number[] = [];
+
+  for (
+    let threshold = config.contours.landThreshold;
+    threshold <= maxElevation + config.contours.isolineIncrement * 0.5;
+    threshold += config.contours.isolineIncrement
+  ) {
+    contourThresholds.push(Number(threshold.toFixed(6)));
+  }
+
+  return contourThresholds;
+}
+
 export function buildSceneState({
   seed,
   config,
@@ -57,15 +71,7 @@ export function buildSceneState({
     profile.elevationSampleMs = performance.now() - elevationStart;
   }
 
-  const contourThresholds: number[] = [];
-  for (
-    let threshold = config.contours.landThreshold;
-    threshold <= maxElevation + config.contours.isolineIncrement * 0.5;
-    threshold += config.contours.isolineIncrement
-  ) {
-    contourThresholds.push(Number(threshold.toFixed(6)));
-  }
-
+  const contourThresholds = createContourThresholds(maxElevation, config);
   const contourLayers = contourThresholds.map((threshold) => createContourLayer(threshold));
   const water = createWaterState(rows);
 

@@ -45,12 +45,7 @@ export type DeepPartial<T> = T extends readonly unknown[]
     ? { [K in keyof T]?: DeepPartial<T[K]> }
     : T;
 
-export type SketchInvalidationScope =
-  | 'none'
-  | 'render-only'
-  | 'rebuild-contours'
-  | 'rebuild-layout'
-  | 'rebuild-scene';
+export type SketchInvalidationScope = 'none' | 'rebuild-scene';
 
 export type SketchConfigInvalidation = {
   scope: SketchInvalidationScope;

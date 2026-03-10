@@ -35,6 +35,8 @@ const waterRenderer = createWaterRenderer(renderContext);
 let scene: SceneState | null = null;
 let unsubscribeController: (() => void) | null = null;
 
+exposeSketchController();
+
 function setup() {
   const root = document.querySelector<HTMLDivElement>('#app');
   const canvas = createCanvas(windowWidth, windowHeight, WEBGL);
@@ -100,16 +102,40 @@ function keyPressed() {
 
 function handleControllerEvent(event: SketchControllerEvent) {
   if (event.type === 'config') {
-    if (event.invalidation.scope === 'none') {
-      return;
-    }
-
-    resetScene(false, scene?.seed ?? Date.now());
+    applyConfigChange(event);
     return;
   }
 
   const seed = event.options.reseed ? event.options.seed : scene?.seed ?? event.options.seed;
   resetScene(event.options.reseed, seed);
+}
+
+function applyConfigChange(event: Extract<SketchControllerEvent, { type: 'config' }>) {
+  if (event.invalidation.scope === 'none') {
+    return;
+  }
+
+  resetScene(false, scene?.seed ?? Date.now());
+}
+
+function drawWaterRows(currentScene: SceneState) {
+  const waterStart = performance.now();
+
+  push();
+  applyProjection(currentScene);
+  applyTerrainTransform(currentScene);
+
+  const waterPoints = waterRenderer.draw(currentScene);
+
+  pop();
+
+  currentScene.waterRow = -1;
+
+  if (currentScene.profile) {
+    currentScene.profile.waterRowsDrawn += getSampledWaterRowCount(currentScene.rows, currentScene.config);
+    currentScene.profile.waterPointsDrawn += waterPoints;
+    currentScene.profile.waterDrawMs += performance.now() - waterStart;
+  }
 }
 
 function resetScene(reseed: boolean, explicitSeed?: number) {
@@ -145,26 +171,6 @@ function resetScene(reseed: boolean, explicitSeed?: number) {
     background(config.colors.background);
     noLoop();
     throw error;
-  }
-}
-
-function drawWaterRows(currentScene: SceneState) {
-  const waterStart = performance.now();
-
-  push();
-  applyProjection(currentScene);
-  applyTerrainTransform(currentScene);
-
-  const waterPoints = waterRenderer.draw(currentScene);
-
-  pop();
-
-  currentScene.waterRow = -1;
-
-  if (currentScene.profile) {
-    currentScene.profile.waterRowsDrawn += getSampledWaterRowCount(currentScene.rows, currentScene.config);
-    currentScene.profile.waterPointsDrawn += waterPoints;
-    currentScene.profile.waterDrawMs += performance.now() - waterStart;
   }
 }
 
@@ -310,6 +316,19 @@ function exposeSceneProfile(profile: SceneProfile | null) {
   } else {
     delete window.__CONTOUR_PROFILE__;
   }
+}
+
+function exposeSketchController() {
+  if (!import.meta.env.DEV) {
+    delete window.__CONTOUR_CONTROLLER__;
+    return;
+  }
+
+  window.__CONTOUR_CONTROLLER__ = {
+    getConfig: () => sketchController.getConfig(),
+    updateConfig: (patch) => sketchController.updateConfig(patch),
+    reset: (options) => sketchController.reset(options),
+  };
 }
 
 function isProfilingEnabled(config: SketchConfig) {

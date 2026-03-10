@@ -1,4 +1,4 @@
-import type { SketchConfig } from '../config/types';
+import type { DeepPartial, SketchConfig } from '../config/types';
 
 export type RenderPhase = 'water' | 'contours' | 'complete';
 export type ContourLayerReadiness = 'pending' | 'geometry-ready' | 'render-ready' | 'disposed';
@@ -167,5 +167,10 @@ declare global {
   interface Window {
     __CONTOUR_PROFILE__?: SceneProfile;
     __CONTOUR_PROFILE_DEBUG__?: boolean;
+    __CONTOUR_CONTROLLER__?: {
+      getConfig: () => SketchConfig;
+      updateConfig: (patch: DeepPartial<SketchConfig>) => unknown;
+      reset: (options?: { reseed?: boolean; seed?: number }) => unknown;
+    };
   }
 }
