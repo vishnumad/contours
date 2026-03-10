@@ -22,6 +22,18 @@ import type {
   WaterRetainedBackend,
   WaterState,
 } from './sketch/scene/types';
+import { hexToNormalizedRgba } from './sketch/shared/color';
+import { addSegment, addTriangle, emitVertices, hasContourVertices } from './sketch/shared/geometry';
+import {
+  binaryToDecimal,
+  createContourLineTransformFromBasis,
+  getElevationIndex,
+  getInterpolationPercent,
+  multiplyMat4,
+  projectToScreen,
+  toFloat32Array,
+} from './sketch/shared/math';
+import { getDerivedCamera, getTerrainScreenOffset } from './sketch/terrain/projection';
 
 const sketchController = createSketchController(defaultSketchConfig);
 const renderContext = createSketchRenderContext();
@@ -1470,7 +1482,7 @@ function drawContourFillImmediate(currentScene: SceneState, contourLayer: Contou
   fill(currentScene.config.colors.background);
   const fillStart = performance.now();
   beginShape(TRIANGLES);
-  emitVertices(contourLayer.geometry.fillVertices);
+  emitVertices(contourLayer.geometry.fillVertices, vertex);
   endShape();
 
   return performance.now() - fillStart;
@@ -1485,7 +1497,7 @@ function drawContourLineImmediate(currentScene: SceneState, contourLayer: Contou
   fill(currentScene.config.colors.outline);
   const lineStart = performance.now();
   beginShape(TRIANGLES);
-  emitVertices(contourLayer.geometry.lineVertices);
+  emitVertices(contourLayer.geometry.lineVertices, vertex);
   endShape();
 
   return performance.now() - lineStart;
@@ -1508,115 +1520,10 @@ function getContourLayerVertexCount(
   return fallbackCount;
 }
 
-function toFloat32Array(values: ArrayLike<number>) {
-  return values instanceof Float32Array ? values : new Float32Array(values);
-}
-
 function isWebGLContext(
   context: RenderingContext | null,
 ): context is WebGLRenderingContext | WebGL2RenderingContext {
   return context instanceof WebGLRenderingContext || context instanceof WebGL2RenderingContext;
-}
-
-function hexToNormalizedRgba(hex: string): [number, number, number, number] {
-  const normalizedHex = hex.startsWith('#') ? hex.slice(1) : hex;
-  const red = Number.parseInt(normalizedHex.slice(0, 2), 16) / 255;
-  const green = Number.parseInt(normalizedHex.slice(2, 4), 16) / 255;
-  const blue = Number.parseInt(normalizedHex.slice(4, 6), 16) / 255;
-
-  return [red, green, blue, 1];
-}
-
-function emitVertices(vertices: ContourVertexData | null) {
-  if (!vertices) {
-    return;
-  }
-
-  for (let index = 0; index < vertices.length; index += 3) {
-    vertex(vertices[index], vertices[index + 1], vertices[index + 2]);
-  }
-}
-
-function addTriangle(
-  vertices: number[],
-  ax: number,
-  ay: number,
-  az: number,
-  bx: number,
-  by: number,
-  bz: number,
-  cx: number,
-  cy: number,
-  cz: number,
-) {
-  vertices.push(ax, ay, az, bx, by, bz, cx, cy, cz);
-}
-
-function addSegment(
-  vertices: number[],
-  contourLineTransform: ContourLineTransform,
-  lineWeight: number,
-  ax: number,
-  ay: number,
-  az: number,
-  bx: number,
-  by: number,
-  bz: number,
-) {
-  const dx = bx - ax;
-  const dy = by - ay;
-  const screenDx = dx * contourLineTransform.screenBasisXX + dy * contourLineTransform.screenBasisYX;
-  const screenDy = dx * contourLineTransform.screenBasisXY + dy * contourLineTransform.screenBasisYY;
-  const screenLength = Math.hypot(screenDx, screenDy);
-
-  if (screenLength < Number.EPSILON) {
-    return;
-  }
-
-  const halfWidth = lineWeight * 0.5;
-  const directionScreenX = screenDx / screenLength;
-  const directionScreenY = screenDy / screenLength;
-  const normalScreenX = -directionScreenY;
-  const normalScreenY = directionScreenX;
-
-  const offsetX = screenToTerrainDeltaX(contourLineTransform, normalScreenX * halfWidth, normalScreenY * halfWidth);
-  const offsetY = screenToTerrainDeltaY(contourLineTransform, normalScreenX * halfWidth, normalScreenY * halfWidth);
-  const extensionX = screenToTerrainDeltaX(contourLineTransform, directionScreenX * halfWidth, directionScreenY * halfWidth);
-  const extensionY = screenToTerrainDeltaY(contourLineTransform, directionScreenX * halfWidth, directionScreenY * halfWidth);
-
-  const startX = ax - extensionX;
-  const startY = ay - extensionY;
-  const endX = bx + extensionX;
-  const endY = by + extensionY;
-
-  addTriangle(
-    vertices,
-    startX + offsetX,
-    startY + offsetY,
-    az,
-    startX - offsetX,
-    startY - offsetY,
-    az,
-    endX + offsetX,
-    endY + offsetY,
-    bz,
-  );
-  addTriangle(
-    vertices,
-    startX - offsetX,
-    startY - offsetY,
-    az,
-    endX - offsetX,
-    endY - offsetY,
-    bz,
-    endX + offsetX,
-    endY + offsetY,
-    bz,
-  );
-}
-
-function hasContourVertices(vertices: ContourVertexData | null) {
-  return Boolean(vertices && vertices.length > 0);
 }
 
 function createContourLineTransform(camera: SketchCameraConfig) {
@@ -1629,9 +1536,10 @@ function createContourLineTransform(camera: SketchCameraConfig) {
   const projectionMatrix = toFloat32Array(renderer.uPMatrix.mat4);
   const modelViewMatrix = toFloat32Array(renderer.uMVMatrix.mat4);
   const clipMatrix = multiplyMat4(projectionMatrix, modelViewMatrix);
-  const origin = projectToScreen(clipMatrix, 0, 0, 0);
-  const unitX = projectToScreen(clipMatrix, 1, 0, 0);
-  const unitY = projectToScreen(clipMatrix, 0, 1, 0);
+  const viewportSize = renderContext.getSize();
+  const origin = projectToScreen(clipMatrix, 0, 0, 0, viewportSize);
+  const unitX = projectToScreen(clipMatrix, 1, 0, 0, viewportSize);
+  const unitY = projectToScreen(clipMatrix, 0, 1, 0, viewportSize);
 
   return createContourLineTransformFromBasis(
     unitX.x - origin.x,
@@ -1651,100 +1559,6 @@ function createFallbackContourLineTransform(camera: SketchCameraConfig) {
   return createContourLineTransformFromBasis(screenBasisXX, screenBasisXY, screenBasisYX, screenBasisYY);
 }
 
-function createContourLineTransformFromBasis(
-  screenBasisXX: number,
-  screenBasisXY: number,
-  screenBasisYX: number,
-  screenBasisYY: number,
-): ContourLineTransform {
-  const determinant = screenBasisXX * screenBasisYY - screenBasisYX * screenBasisXY;
-
-  if (Math.abs(determinant) < Number.EPSILON) {
-    return {
-      screenBasisXX,
-      screenBasisXY,
-      screenBasisYX,
-      screenBasisYY,
-      terrainBasisXX: 1,
-      terrainBasisXY: 0,
-      terrainBasisYX: 0,
-      terrainBasisYY: 1,
-    };
-  }
-
-  const inverseDeterminant = 1 / determinant;
-
-  return {
-    screenBasisXX,
-    screenBasisXY,
-    screenBasisYX,
-    screenBasisYY,
-    terrainBasisXX: screenBasisYY * inverseDeterminant,
-    terrainBasisXY: -screenBasisYX * inverseDeterminant,
-    terrainBasisYX: -screenBasisXY * inverseDeterminant,
-    terrainBasisYY: screenBasisXX * inverseDeterminant,
-  };
-}
-
-function multiplyMat4(left: ArrayLike<number>, right: ArrayLike<number>) {
-  const result = new Float32Array(16);
-
-  for (let column = 0; column < 4; column += 1) {
-    const rightColumnOffset = column * 4;
-    for (let row = 0; row < 4; row += 1) {
-      result[rightColumnOffset + row] =
-        left[row] * right[rightColumnOffset]
-        + left[row + 4] * right[rightColumnOffset + 1]
-        + left[row + 8] * right[rightColumnOffset + 2]
-        + left[row + 12] * right[rightColumnOffset + 3];
-    }
-  }
-
-  return result;
-}
-
-function projectToScreen(matrix: ArrayLike<number>, x: number, y: number, z: number) {
-  const viewportSize = renderContext.getSize();
-  const clipX = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
-  const clipY = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
-  const clipW = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
-  const reciprocalW = Math.abs(clipW) < Number.EPSILON ? 1 : 1 / clipW;
-  const ndcX = clipX * reciprocalW;
-  const ndcY = clipY * reciprocalW;
-
-  return {
-    x: (ndcX * 0.5 + 0.5) * viewportSize.width,
-    y: (0.5 - ndcY * 0.5) * viewportSize.height,
-  };
-}
-
-function screenToTerrainDeltaX(contourLineTransform: ContourLineTransform, screenDx: number, screenDy: number) {
-  return screenDx * contourLineTransform.terrainBasisXX + screenDy * contourLineTransform.terrainBasisXY;
-}
-
-function screenToTerrainDeltaY(contourLineTransform: ContourLineTransform, screenDx: number, screenDy: number) {
-  return screenDx * contourLineTransform.terrainBasisYX + screenDy * contourLineTransform.terrainBasisYY;
-}
-
-function getInterpolationPercent(threshold: number, start: number, end: number) {
-  const range = end - start;
-
-  if (Math.abs(range) < Number.EPSILON) {
-    return 0.5;
-  }
-
-  return constrain((threshold - start) / range, 0, 1);
-}
-
-function binaryToDecimal(a: number, b: number, c: number, d: number, threshold: number) {
-  const aBit = a > threshold ? 8 : 0;
-  const bBit = b > threshold ? 4 : 0;
-  const cBit = c > threshold ? 2 : 0;
-  const dBit = d > threshold ? 1 : 0;
-
-  return aBit + bBit + cBit + dBit;
-}
-
 function getElevation(currentScene: SceneState, col: number, row: number) {
   return currentScene.elevations[getElevationIndex(col, row, currentScene.cols)];
 }
@@ -1759,51 +1573,6 @@ function getSampledWaterRowCount(rows: number, config: SketchConfig) {
   return initialWaterRow < 0 ? 0 : Math.floor(initialWaterRow / config.water.sampleStep) + 1;
 }
 
-function getElevationIndex(col: number, row: number, cols: number) {
-  return row * cols + col;
-}
-
-function getTerrainScreenOffset(worldWidth: number, worldHeight: number, config: SketchConfig): TerrainScreenOffset {
-  const halfWorldWidth = worldWidth * 0.5;
-  const halfWorldHeight = worldHeight * 0.5;
-  const waterPlaneZ = config.contours.landThreshold * config.terrain.elevationMultiplier + config.terrain.verticalBias;
-  const corners = [
-    [-halfWorldWidth, -halfWorldHeight, waterPlaneZ],
-    [halfWorldWidth, -halfWorldHeight, waterPlaneZ],
-    [-halfWorldWidth, halfWorldHeight, waterPlaneZ],
-    [halfWorldWidth, halfWorldHeight, waterPlaneZ],
-  ] as const;
-  let minX = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-
-  for (const [x, y, z] of corners) {
-    const projected = rotateTerrainPoint(x, y, z, config.camera);
-
-    minX = Math.min(minX, projected.x);
-    maxX = Math.max(maxX, projected.x);
-    minY = Math.min(minY, projected.y);
-    maxY = Math.max(maxY, projected.y);
-  }
-
-  return {
-    x: (minX + maxX) * 0.5,
-    y: (minY + maxY) * 0.5,
-  };
-}
-
-function rotateTerrainPoint(x: number, y: number, z: number, camera: SketchCameraConfig) {
-  const derivedCamera = getDerivedCamera(camera);
-  const rotatedX = x * derivedCamera.rotationZCos - y * derivedCamera.rotationZSin;
-  const rotatedYBeforeTilt = x * derivedCamera.rotationZSin + y * derivedCamera.rotationZCos;
-
-  return {
-    x: rotatedX,
-    y: rotatedYBeforeTilt * derivedCamera.rotationXCos - z * derivedCamera.rotationXSin,
-  };
-}
-
 function applyProjection(currentScene: SceneState) {
   const viewportSize = renderContext.getSize();
   const depth = Math.max(currentScene.worldWidth, currentScene.worldHeight) * 2;
@@ -1814,15 +1583,6 @@ function applyTerrainTransform(currentScene: SceneState) {
   translate(-currentScene.terrainScreenOffset.x, -currentScene.terrainScreenOffset.y, 0);
   rotateX(currentScene.config.camera.rotationX);
   rotateZ(currentScene.config.camera.rotationZ);
-}
-
-function getDerivedCamera(camera: SketchCameraConfig) {
-  return {
-    rotationXCos: Math.cos(camera.rotationX),
-    rotationXSin: Math.sin(camera.rotationX),
-    rotationZCos: Math.cos(camera.rotationZ),
-    rotationZSin: Math.sin(camera.rotationZ),
-  };
 }
 
 initP5({ setup, draw, windowResized, keyPressed });
