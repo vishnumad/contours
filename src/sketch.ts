@@ -1,17 +1,26 @@
 import './style.css';
 import { initP5 } from './p5/init';
+import {
+  createContourGeometryStats,
+  createContourLayer,
+  disposeContourLayer,
+  disposeContourLayerResourceSlot,
+  markContourLayerRenderReady,
+  updateContourLayerGeometry,
+  updateContourLayerStats,
+} from './sketch/contours/layer';
+import { createContourLineTransform } from './sketch/contours/lineTransform';
+import { collectCellGeometry } from './sketch/contours/marchingSquares';
 import { createSketchController } from './sketch/config/controller';
 import type { SketchControllerEvent } from './sketch/config/controller';
 import { defaultSketchConfig } from './sketch/config/defaults';
-import type { SketchCameraConfig, SketchConfig } from './sketch/config/types';
+import type { SketchConfig } from './sketch/config/types';
 import { createSketchRenderContext } from './sketch/runtime/renderContext';
 import { buildSceneState } from './sketch/scene/buildSceneState';
 import type {
-  ContourGeometryStats,
   ContourLayer,
   ContourLayerResourceSlot,
   ContourLayerStats,
-  ContourLineTransform,
   ContourRenderBuffer,
   ContourRetainedBackend,
   ContourVertexData,
@@ -20,17 +29,9 @@ import type {
   ThresholdProfile,
 } from './sketch/scene/types';
 import { hexToNormalizedRgba } from './sketch/shared/color';
-import { addSegment, addTriangle, emitVertices, hasContourVertices } from './sketch/shared/geometry';
-import {
-  binaryToDecimal,
-  createContourLineTransformFromBasis,
-  getInterpolationPercent,
-  multiplyMat4,
-  projectToScreen,
-  toFloat32Array,
-} from './sketch/shared/math';
-import { getDerivedCamera } from './sketch/terrain/projection';
-import { getElevation, getSampledWaterRowCount } from './sketch/terrain/elevation';
+import { emitVertices, hasContourVertices } from './sketch/shared/geometry';
+import { toFloat32Array } from './sketch/shared/math';
+import { getSampledWaterRowCount } from './sketch/terrain/elevation';
 import { disposeWaterState } from './sketch/water/geometry';
 import { createWaterRenderer } from './sketch/water/renderRetained';
 
@@ -222,7 +223,7 @@ function drawContourLayer(currentScene: SceneState, contourLayer: ContourLayer) 
     push();
     applyProjection(currentScene);
     applyTerrainTransform(currentScene);
-    const contourLineTransform = createContourLineTransform(currentScene.config.camera);
+    const contourLineTransform = createContourLineTransform(renderContext, currentScene.config.camera);
     pop();
 
     for (let col = 0; col < currentScene.cols - 1; col += 1) {
@@ -300,322 +301,6 @@ function drawContourLayer(currentScene: SceneState, contourLayer: ContourLayer) 
     threshold,
     ...stats,
   });
-}
-
-function collectCellGeometry(
-  currentScene: SceneState,
-  threshold: number,
-  col: number,
-  row: number,
-  fillVertices: number[],
-  lineVertices: number[],
-  geometryStats: ContourGeometryStats,
-  contourLineTransform: ContourLineTransform,
-) {
-  const nw = getElevation(currentScene, col, row);
-  const ne = getElevation(currentScene, col + 1, row);
-  const sw = getElevation(currentScene, col, row + 1);
-  const se = getElevation(currentScene, col + 1, row + 1);
-  const caseIndex = binaryToDecimal(nw, ne, se, sw, threshold);
-
-  if (caseIndex === 0) {
-    return;
-  }
-
-  geometryStats.activeCellCount += 1;
-
-  if (caseIndex === 15) {
-    geometryStats.fullCellCount += 1;
-    if (Math.abs(threshold - nw) < currentScene.config.contours.fullCellFillEpsilon) {
-      const fillZ = threshold * currentScene.config.terrain.elevationMultiplier + currentScene.config.terrain.verticalBias - 1.5;
-      const x = col * currentScene.config.terrain.spacing - currentScene.worldWidth / 2;
-      const y = row * currentScene.config.terrain.spacing - currentScene.worldHeight / 2;
-      const maxX = x + currentScene.config.terrain.spacing;
-      const maxY = y + currentScene.config.terrain.spacing;
-
-      addTriangle(fillVertices, x, y, fillZ, maxX, y, fillZ, maxX, maxY, fillZ);
-      addTriangle(fillVertices, x, y, fillZ, x, maxY, fillZ, maxX, maxY, fillZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.triangleCount += 2;
-    }
-    return;
-  }
-
-  const fillZ = threshold * currentScene.config.terrain.elevationMultiplier + currentScene.config.terrain.verticalBias - 1.5;
-  const x = col * currentScene.config.terrain.spacing - currentScene.worldWidth / 2;
-  const y = row * currentScene.config.terrain.spacing - currentScene.worldHeight / 2;
-  const maxX = x + currentScene.config.terrain.spacing;
-  const maxY = y + currentScene.config.terrain.spacing;
-  const contourZ = fillZ + 1.5;
-
-  let ax = 0;
-  let by = 0;
-  let cx = 0;
-  let dy = 0;
-  let hasTopIntersection = false;
-  let hasRightIntersection = false;
-  let hasBottomIntersection = false;
-  let hasLeftIntersection = false;
-
-  const getTopIntersectionX = () => {
-    if (!hasTopIntersection) {
-      ax = lerp(x, maxX, getInterpolationPercent(threshold, nw, ne));
-      hasTopIntersection = true;
-    }
-
-    return ax;
-  };
-
-  const getRightIntersectionY = () => {
-    if (!hasRightIntersection) {
-      by = lerp(y, maxY, getInterpolationPercent(threshold, ne, se));
-      hasRightIntersection = true;
-    }
-
-    return by;
-  };
-
-  const getBottomIntersectionX = () => {
-    if (!hasBottomIntersection) {
-      cx = lerp(x, maxX, getInterpolationPercent(threshold, sw, se));
-      hasBottomIntersection = true;
-    }
-
-    return cx;
-  };
-
-  const getLeftIntersectionY = () => {
-    if (!hasLeftIntersection) {
-      dy = lerp(y, maxY, getInterpolationPercent(threshold, nw, sw));
-      hasLeftIntersection = true;
-    }
-
-    return dy;
-  };
-
-  switch (caseIndex) {
-    case 1:
-      addTriangle(fillVertices, getBottomIntersectionX(), maxY, fillZ, x, getLeftIntersectionY(), fillZ, x, maxY, fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getBottomIntersectionX(), maxY, contourZ, x, getLeftIntersectionY(), contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 1;
-      geometryStats.segmentCount += 1;
-      break;
-    case 2:
-      addTriangle(fillVertices, maxX, getRightIntersectionY(), fillZ, getBottomIntersectionX(), maxY, fillZ, maxX, maxY, fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, maxX, getRightIntersectionY(), contourZ, getBottomIntersectionX(), maxY, contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 1;
-      geometryStats.segmentCount += 1;
-      break;
-    case 3:
-      addTriangle(fillVertices, maxX, getRightIntersectionY(), fillZ, x, getLeftIntersectionY(), fillZ, x, maxY, fillZ);
-      addTriangle(fillVertices, x, maxY, fillZ, maxX, maxY, fillZ, maxX, getRightIntersectionY(), fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, maxX, getRightIntersectionY(), contourZ, x, getLeftIntersectionY(), contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 2;
-      geometryStats.segmentCount += 1;
-      break;
-    case 4:
-      addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, maxX, getRightIntersectionY(), fillZ, maxX, y, fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, maxX, getRightIntersectionY(), contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 1;
-      geometryStats.segmentCount += 1;
-      break;
-    case 5:
-      addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, maxX, getRightIntersectionY(), fillZ, maxX, y, fillZ);
-      addTriangle(fillVertices, getBottomIntersectionX(), maxY, fillZ, x, getLeftIntersectionY(), fillZ, x, maxY, fillZ);
-      addTriangle(fillVertices, getBottomIntersectionX(), maxY, fillZ, x, getLeftIntersectionY(), fillZ, getTopIntersectionX(), y, fillZ);
-      addTriangle(fillVertices, getBottomIntersectionX(), maxY, fillZ, maxX, getRightIntersectionY(), fillZ, getTopIntersectionX(), y, fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, x, getLeftIntersectionY(), contourZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, maxX, getRightIntersectionY(), contourZ, getBottomIntersectionX(), maxY, contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 4;
-      geometryStats.segmentCount += 2;
-      break;
-    case 6:
-      addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, getBottomIntersectionX(), maxY, fillZ, maxX, maxY, fillZ);
-      addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, maxX, y, fillZ, maxX, maxY, fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, getBottomIntersectionX(), maxY, contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 2;
-      geometryStats.segmentCount += 1;
-      break;
-    case 7:
-      addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, maxX, y, fillZ, maxX, maxY, fillZ);
-      addTriangle(fillVertices, x, getLeftIntersectionY(), fillZ, x, maxY, fillZ, maxX, maxY, fillZ);
-      addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, x, getLeftIntersectionY(), fillZ, maxX, maxY, fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, x, getLeftIntersectionY(), contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 3;
-      geometryStats.segmentCount += 1;
-      break;
-    case 8:
-      addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, x, getLeftIntersectionY(), fillZ, x, y, fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, x, getLeftIntersectionY(), contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 1;
-      geometryStats.segmentCount += 1;
-      break;
-    case 9:
-      addTriangle(fillVertices, x, y, fillZ, getTopIntersectionX(), y, fillZ, getBottomIntersectionX(), maxY, fillZ);
-      addTriangle(fillVertices, x, y, fillZ, x, maxY, fillZ, getBottomIntersectionX(), maxY, fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, getBottomIntersectionX(), maxY, contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 2;
-      geometryStats.segmentCount += 1;
-      break;
-    case 10:
-      addTriangle(fillVertices, x, y, fillZ, getTopIntersectionX(), y, fillZ, x, getLeftIntersectionY(), fillZ);
-      addTriangle(fillVertices, maxX, getRightIntersectionY(), fillZ, getBottomIntersectionX(), maxY, fillZ, maxX, maxY, fillZ);
-      addTriangle(fillVertices, maxX, getRightIntersectionY(), fillZ, getBottomIntersectionX(), maxY, fillZ, x, getLeftIntersectionY(), fillZ);
-      addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, maxX, getRightIntersectionY(), fillZ, x, getLeftIntersectionY(), fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, maxX, getRightIntersectionY(), contourZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getBottomIntersectionX(), maxY, contourZ, x, getLeftIntersectionY(), contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 4;
-      geometryStats.segmentCount += 2;
-      break;
-    case 11:
-      addTriangle(fillVertices, x, y, fillZ, getTopIntersectionX(), y, fillZ, x, maxY, fillZ);
-      addTriangle(fillVertices, maxX, getRightIntersectionY(), fillZ, maxX, maxY, fillZ, x, maxY, fillZ);
-      addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, maxX, getRightIntersectionY(), fillZ, x, maxY, fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, maxX, getRightIntersectionY(), contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 3;
-      geometryStats.segmentCount += 1;
-      break;
-    case 12:
-      addTriangle(fillVertices, x, y, fillZ, maxX, y, fillZ, maxX, getRightIntersectionY(), fillZ);
-      addTriangle(fillVertices, x, y, fillZ, x, getLeftIntersectionY(), fillZ, maxX, getRightIntersectionY(), fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, maxX, getRightIntersectionY(), contourZ, x, getLeftIntersectionY(), contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 2;
-      geometryStats.segmentCount += 1;
-      break;
-    case 13:
-      addTriangle(fillVertices, x, y, fillZ, maxX, y, fillZ, maxX, getRightIntersectionY(), fillZ);
-      addTriangle(fillVertices, x, y, fillZ, x, maxY, fillZ, getBottomIntersectionX(), maxY, fillZ);
-      addTriangle(fillVertices, maxX, getRightIntersectionY(), fillZ, getBottomIntersectionX(), maxY, fillZ, x, y, fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, maxX, getRightIntersectionY(), contourZ, getBottomIntersectionX(), maxY, contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 3;
-      geometryStats.segmentCount += 1;
-      break;
-    case 14:
-      addTriangle(fillVertices, x, getLeftIntersectionY(), fillZ, x, y, fillZ, maxX, y, fillZ);
-      addTriangle(fillVertices, getBottomIntersectionX(), maxY, fillZ, maxX, y, fillZ, maxX, maxY, fillZ);
-      addTriangle(fillVertices, getBottomIntersectionX(), maxY, fillZ, x, getLeftIntersectionY(), fillZ, maxX, y, fillZ);
-      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getBottomIntersectionX(), maxY, contourZ, x, getLeftIntersectionY(), contourZ);
-      geometryStats.fillCellCount += 1;
-      geometryStats.lineCellCount += 1;
-      geometryStats.triangleCount += 3;
-      geometryStats.segmentCount += 1;
-      break;
-    default:
-      break;
-  }
-}
-
-function createContourGeometryStats(): ContourGeometryStats {
-  return {
-    activeCellCount: 0,
-    fillCellCount: 0,
-    lineCellCount: 0,
-    fullCellCount: 0,
-    triangleCount: 0,
-    segmentCount: 0,
-  };
-}
-
-function createContourLayerStats(): ContourLayerStats {
-  return {
-    ...createContourGeometryStats(),
-    geometryMs: 0,
-    uploadMs: 0,
-    fillUploadMs: 0,
-    lineUploadMs: 0,
-    drawMs: 0,
-    fillDrawMs: 0,
-    lineDrawMs: 0,
-    fillVertexCount: 0,
-    lineVertexCount: 0,
-  };
-}
-
-function createContourLayerResourceSlot(): ContourLayerResourceSlot {
-  return {
-    handle: null,
-    dispose: null,
-  };
-}
-
-function createContourLayer(threshold: number): ContourLayer {
-  return {
-    threshold,
-    readiness: 'pending',
-    geometry: {
-      fillVertices: null,
-      lineVertices: null,
-    },
-    stats: createContourLayerStats(),
-    renderResources: {
-      fill: createContourLayerResourceSlot(),
-      line: createContourLayerResourceSlot(),
-    },
-  };
-}
-
-function updateContourLayerStats(contourLayer: ContourLayer, stats: ContourLayerStats) {
-  contourLayer.stats = stats;
-}
-
-function updateContourLayerGeometry(contourLayer: ContourLayer, fillVertices: ContourVertexData, lineVertices: ContourVertexData) {
-  disposeContourLayerResourceSlot(contourLayer.renderResources.fill);
-  disposeContourLayerResourceSlot(contourLayer.renderResources.line);
-  releaseContourLayerCpuGeometry(contourLayer);
-  contourLayer.geometry.fillVertices = fillVertices;
-  contourLayer.geometry.lineVertices = lineVertices;
-  contourLayer.readiness = 'geometry-ready';
-}
-
-function releaseContourLayerCpuGeometry(contourLayer: ContourLayer) {
-  contourLayer.geometry.fillVertices = null;
-  contourLayer.geometry.lineVertices = null;
-}
-
-function markContourLayerRenderReady(contourLayer: ContourLayer) {
-  contourLayer.readiness = 'render-ready';
-  releaseContourLayerCpuGeometry(contourLayer);
-}
-
-function disposeContourLayerResourceSlot(resourceSlot: ContourLayerResourceSlot) {
-  resourceSlot.handle = null;
-  const dispose = resourceSlot.dispose;
-  resourceSlot.dispose = null;
-
-  dispose?.();
-}
-
-function disposeContourLayer(contourLayer: ContourLayer) {
-  releaseContourLayerCpuGeometry(contourLayer);
-  disposeContourLayerResourceSlot(contourLayer.renderResources.fill);
-  disposeContourLayerResourceSlot(contourLayer.renderResources.line);
-  contourLayer.readiness = 'disposed';
 }
 
 function destroyContourRetainedBackend() {
@@ -1152,39 +837,6 @@ function isWebGLContext(
   context: RenderingContext | null,
 ): context is WebGLRenderingContext | WebGL2RenderingContext {
   return context instanceof WebGLRenderingContext || context instanceof WebGL2RenderingContext;
-}
-
-function createContourLineTransform(camera: SketchCameraConfig) {
-  const renderer = renderContext.getRenderer();
-
-  if (!renderer) {
-    return createFallbackContourLineTransform(camera);
-  }
-
-  const projectionMatrix = toFloat32Array(renderer.uPMatrix.mat4);
-  const modelViewMatrix = toFloat32Array(renderer.uMVMatrix.mat4);
-  const clipMatrix = multiplyMat4(projectionMatrix, modelViewMatrix);
-  const viewportSize = renderContext.getSize();
-  const origin = projectToScreen(clipMatrix, 0, 0, 0, viewportSize);
-  const unitX = projectToScreen(clipMatrix, 1, 0, 0, viewportSize);
-  const unitY = projectToScreen(clipMatrix, 0, 1, 0, viewportSize);
-
-  return createContourLineTransformFromBasis(
-    unitX.x - origin.x,
-    unitX.y - origin.y,
-    unitY.x - origin.x,
-    unitY.y - origin.y,
-  );
-}
-
-function createFallbackContourLineTransform(camera: SketchCameraConfig) {
-  const derivedCamera = getDerivedCamera(camera);
-  const screenBasisXX = derivedCamera.rotationZCos;
-  const screenBasisXY = derivedCamera.rotationZSin;
-  const screenBasisYX = -derivedCamera.rotationZSin * derivedCamera.rotationXCos;
-  const screenBasisYY = derivedCamera.rotationZCos * derivedCamera.rotationXCos;
-
-  return createContourLineTransformFromBasis(screenBasisXX, screenBasisXY, screenBasisYX, screenBasisYY);
 }
 
 function applyProjection(currentScene: SceneState) {

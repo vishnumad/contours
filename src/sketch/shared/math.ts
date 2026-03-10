@@ -1,5 +1,3 @@
-import type { ContourLineTransform } from '../scene/types';
-
 export type ViewportSize = {
   width: number;
   height: number;
@@ -44,49 +42,6 @@ export function projectToScreen(
     x: (ndcX * 0.5 + 0.5) * viewportSize.width,
     y: (0.5 - ndcY * 0.5) * viewportSize.height,
   };
-}
-
-export function createContourLineTransformFromBasis(
-  screenBasisXX: number,
-  screenBasisXY: number,
-  screenBasisYX: number,
-  screenBasisYY: number,
-): ContourLineTransform {
-  const determinant = screenBasisXX * screenBasisYY - screenBasisYX * screenBasisXY;
-
-  if (Math.abs(determinant) < Number.EPSILON) {
-    return {
-      screenBasisXX,
-      screenBasisXY,
-      screenBasisYX,
-      screenBasisYY,
-      terrainBasisXX: 1,
-      terrainBasisXY: 0,
-      terrainBasisYX: 0,
-      terrainBasisYY: 1,
-    };
-  }
-
-  const inverseDeterminant = 1 / determinant;
-
-  return {
-    screenBasisXX,
-    screenBasisXY,
-    screenBasisYX,
-    screenBasisYY,
-    terrainBasisXX: screenBasisYY * inverseDeterminant,
-    terrainBasisXY: -screenBasisYX * inverseDeterminant,
-    terrainBasisYX: -screenBasisXY * inverseDeterminant,
-    terrainBasisYY: screenBasisXX * inverseDeterminant,
-  };
-}
-
-export function screenToTerrainDeltaX(contourLineTransform: ContourLineTransform, screenDx: number, screenDy: number) {
-  return screenDx * contourLineTransform.terrainBasisXX + screenDy * contourLineTransform.terrainBasisXY;
-}
-
-export function screenToTerrainDeltaY(contourLineTransform: ContourLineTransform, screenDx: number, screenDy: number) {
-  return screenDx * contourLineTransform.terrainBasisYX + screenDy * contourLineTransform.terrainBasisYY;
 }
 
 export function getInterpolationPercent(threshold: number, start: number, end: number) {

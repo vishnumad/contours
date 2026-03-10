@@ -1,5 +1,5 @@
 import type { ContourLineTransform, ContourVertexData } from '../scene/types';
-import { screenToTerrainDeltaX, screenToTerrainDeltaY } from './math';
+import { screenToTerrainDeltaX, screenToTerrainDeltaY } from '../contours/lineTransform';
 
 export function emitVertices(
   vertices: ContourVertexData | null,
