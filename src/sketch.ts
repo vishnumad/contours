@@ -1,8 +1,10 @@
 import './style.css';
-import type p5 from 'p5';
 import { initP5 } from './p5/init';
+import { createSketchController } from './sketch/config/controller';
+import type { SketchControllerEvent } from './sketch/config/controller';
 import { defaultSketchConfig } from './sketch/config/defaults';
 import type { SketchCameraConfig, SketchConfig } from './sketch/config/types';
+import { createSketchRenderContext } from './sketch/runtime/renderContext';
 import type {
   ContourGeometryStats,
   ContourLayer,
@@ -21,11 +23,13 @@ import type {
   WaterState,
 } from './sketch/scene/types';
 
-const sketchConfig = defaultSketchConfig;
+const sketchController = createSketchController(defaultSketchConfig);
+const renderContext = createSketchRenderContext();
 
 let scene: SceneState | null = null;
 let contourRetainedBackend: ContourRetainedBackend | null = null;
 let waterRetainedBackend: WaterRetainedBackend | null = null;
+let unsubscribeController: (() => void) | null = null;
 
 const RETAINED_CONTOUR_VERTEX_SHADER = `
 attribute vec3 aPosition;
@@ -82,7 +86,9 @@ function setup() {
   strokeCap(ROUND);
   strokeJoin(ROUND);
 
-  resetScene(true);
+  unsubscribeController?.();
+  unsubscribeController = sketchController.subscribe(handleControllerEvent);
+  sketchController.reset({ reseed: true });
 }
 
 function draw() {
@@ -124,18 +130,32 @@ function draw() {
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   pixelDensity(Math.min(window.devicePixelRatio || 1, 2));
-  resetScene(false);
+  sketchController.reset({ reseed: false });
 }
 
 function keyPressed() {
   if (key === 'r' || key === 'R') {
-    resetScene(true);
+    sketchController.reset({ reseed: true });
   }
 }
 
-function resetScene(reseed: boolean) {
-  const config = sketchConfig;
-  const seed = reseed || !scene ? Date.now() : scene.seed;
+function handleControllerEvent(event: SketchControllerEvent) {
+  if (event.type === 'config') {
+    if (event.invalidation.scope === 'none') {
+      return;
+    }
+
+    resetScene(false, scene?.seed ?? Date.now());
+    return;
+  }
+
+  const seed = event.options.reseed ? event.options.seed : scene?.seed ?? event.options.seed;
+  resetScene(event.options.reseed, seed);
+}
+
+function resetScene(reseed: boolean, explicitSeed?: number) {
+  const config = sketchController.getConfig();
+  const seed = explicitSeed ?? (reseed || !scene ? Date.now() : scene.seed);
   const previousScene = scene;
 
   scene = null;
@@ -972,6 +992,7 @@ function getContourRetainedBackend() {
 
   destroyContourRetainedBackend();
 
+  const drawingContext = renderContext.getDrawingContext();
   if (!isWebGLContext(drawingContext)) {
     return null;
   }
@@ -1016,6 +1037,7 @@ function getWaterRetainedBackend() {
 
   destroyWaterRetainedBackend();
 
+  const drawingContext = renderContext.getDrawingContext();
   if (!isWebGLContext(drawingContext)) {
     return null;
   }
@@ -1057,6 +1079,7 @@ function getWaterRetainedBackend() {
 }
 
 function isContourRetainedBackendValid(backend: ContourRetainedBackend) {
+  const drawingContext = renderContext.getDrawingContext();
   if (!isWebGLContext(drawingContext) || backend.gl !== drawingContext) {
     return false;
   }
@@ -1065,6 +1088,7 @@ function isContourRetainedBackendValid(backend: ContourRetainedBackend) {
 }
 
 function isWaterRetainedBackendValid(backend: WaterRetainedBackend) {
+  const drawingContext = renderContext.getDrawingContext();
   if (!isWebGLContext(drawingContext) || backend.gl !== drawingContext) {
     return false;
   }
@@ -1272,7 +1296,7 @@ function uploadContourLayerResource(
 }
 
 function drawContourFillRetained(backend: ContourRetainedBackend, currentScene: SceneState, contourLayer: ContourLayer) {
-  const renderer = getP5Renderer();
+  const renderer = renderContext.getRenderer();
   if (!renderer) {
     return drawContourFillImmediate(currentScene, contourLayer);
   }
@@ -1322,7 +1346,7 @@ function drawContourFillRetained(backend: ContourRetainedBackend, currentScene: 
 }
 
 function drawContourLineRetained(backend: ContourRetainedBackend, currentScene: SceneState, contourLayer: ContourLayer) {
-  const renderer = getP5Renderer();
+  const renderer = renderContext.getRenderer();
   if (!renderer) {
     return drawContourLineImmediate(currentScene, contourLayer);
   }
@@ -1389,7 +1413,7 @@ function drawWaterRetained(
   backend: WaterRetainedBackend,
   currentScene: SceneState,
 ) {
-  const renderer = getP5Renderer();
+  const renderer = renderContext.getRenderer();
   const handle = currentScene.water.renderResources.points.handle as ContourRenderBuffer | null;
 
   if (!renderer || !handle) {
@@ -1400,7 +1424,7 @@ function drawWaterRetained(
   const previousProgram = gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null;
   const previousArrayBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING) as WebGLBuffer | null;
   const wasPositionAttribEnabled = Boolean(gl.getVertexAttrib(backend.positionLocation, gl.VERTEX_ATTRIB_ARRAY_ENABLED));
-  const pointSize = Math.max(1, currentScene.config.water.pointSize * pixelDensity());
+  const pointSize = Math.max(1, currentScene.config.water.pointSize * renderContext.getPixelDensity());
 
   gl.useProgram(backend.program);
   gl.uniformMatrix4fv(backend.projectionMatrixLocation, false, toFloat32Array(renderer.uPMatrix.mat4));
@@ -1482,12 +1506,6 @@ function getContourLayerVertexCount(
   }
 
   return fallbackCount;
-}
-
-function getP5Renderer() {
-  const renderer = (window.__CONTOUR_P5__ as p5 | undefined as (p5 & { _renderer?: P5RendererLike }) | undefined)?._renderer;
-
-  return renderer ?? null;
 }
 
 function toFloat32Array(values: ArrayLike<number>) {
@@ -1602,7 +1620,7 @@ function hasContourVertices(vertices: ContourVertexData | null) {
 }
 
 function createContourLineTransform(camera: SketchCameraConfig) {
-  const renderer = getP5Renderer();
+  const renderer = renderContext.getRenderer();
 
   if (!renderer) {
     return createFallbackContourLineTransform(camera);
@@ -1686,6 +1704,7 @@ function multiplyMat4(left: ArrayLike<number>, right: ArrayLike<number>) {
 }
 
 function projectToScreen(matrix: ArrayLike<number>, x: number, y: number, z: number) {
+  const viewportSize = renderContext.getSize();
   const clipX = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
   const clipY = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
   const clipW = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
@@ -1694,8 +1713,8 @@ function projectToScreen(matrix: ArrayLike<number>, x: number, y: number, z: num
   const ndcY = clipY * reciprocalW;
 
   return {
-    x: (ndcX * 0.5 + 0.5) * width,
-    y: (0.5 - ndcY * 0.5) * height,
+    x: (ndcX * 0.5 + 0.5) * viewportSize.width,
+    y: (0.5 - ndcY * 0.5) * viewportSize.height,
   };
 }
 
@@ -1786,8 +1805,9 @@ function rotateTerrainPoint(x: number, y: number, z: number, camera: SketchCamer
 }
 
 function applyProjection(currentScene: SceneState) {
+  const viewportSize = renderContext.getSize();
   const depth = Math.max(currentScene.worldWidth, currentScene.worldHeight) * 2;
-  ortho(-width / 2, width / 2, -height / 2, height / 2, -depth, depth);
+  ortho(-viewportSize.width / 2, viewportSize.width / 2, -viewportSize.height / 2, viewportSize.height / 2, -depth, depth);
 }
 
 function applyTerrainTransform(currentScene: SceneState) {

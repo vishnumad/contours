@@ -39,6 +39,29 @@ export type SketchProfileConfig = {
   storageKey: string;
 };
 
+export type DeepPartial<T> = T extends readonly unknown[]
+  ? T
+  : T extends object
+    ? { [K in keyof T]?: DeepPartial<T[K]> }
+    : T;
+
+export type SketchInvalidationScope =
+  | 'none'
+  | 'render-only'
+  | 'rebuild-contours'
+  | 'rebuild-layout'
+  | 'rebuild-scene';
+
+export type SketchConfigInvalidation = {
+  scope: SketchInvalidationScope;
+  changedPaths: string[];
+};
+
+export type SketchResetOptions = {
+  reseed?: boolean;
+  seed?: number;
+};
+
 export type SketchConfig = {
   terrain: SketchTerrainConfig;
   contours: SketchContoursConfig;
