@@ -3,12 +3,13 @@ import type p5 from 'p5';
 import { initP5 } from './p5/init';
 
 const SPACING = 4;
-const NOISE_SCALE = 0.0095;
-const LAND_THRESHOLD = 0.5;
+const NOISE_SCALE = 0.0085;
+const LAND_THRESHOLD = 0.47;
 const ISOLINE_INCREMENT = 0.003;
+const CONTOUR_LINE_WEIGHT = 1.25;
 
-const VERTICAL_BIAS = -175;
-const ELEVATION_MULTIPLIER = 275;
+const VERTICAL_BIAS = 0;
+const ELEVATION_MULTIPLIER = 475;
 
 const BACKGROUND_COLOR = '#fef0d9';
 const OUTLINE_COLOR = '#c0526e';
@@ -18,9 +19,8 @@ const WATER_SAMPLE_STEP = 2;
 const WATER_POINT_SIZE = 1.7;
 const CAMERA_ROTATION_X = (65 * Math.PI) / 180;
 const CAMERA_ROTATION_Z = (45 * Math.PI) / 180;
-const CONTOUR_LINE_WEIGHT = 1.5;
 
-const TERRAIN_VIEWPORT_SCALE = 1.25;
+const TERRAIN_VIEWPORT_SCALE = 1.2;
 const TERRAIN_MIN_SIZE = 720;
 const TERRAIN_MAX_SIZE = 2000;
 const TERRAIN_PADDING = SPACING;
@@ -104,6 +104,11 @@ type ContourLineTransform = {
   terrainBasisYY: number;
 };
 
+type TerrainScreenOffset = {
+  x: number;
+  y: number;
+};
+
 type ContourLayerRenderResources = {
   fill: ContourLayerResourceSlot;
   line: ContourLayerResourceSlot;
@@ -176,6 +181,7 @@ type SceneState = {
   worldHeight: number;
   elevations: Float32Array;
   maxElevation: number;
+  terrainScreenOffset: TerrainScreenOffset;
   water: WaterState;
   contourLayers: ContourLayer[];
   waterRow: number;
@@ -241,6 +247,7 @@ void main() {
 `;
 
 const CAMERA_ROTATION_X_COS = Math.cos(CAMERA_ROTATION_X);
+const CAMERA_ROTATION_X_SIN = Math.sin(CAMERA_ROTATION_X);
 const CAMERA_ROTATION_Z_COS = Math.cos(CAMERA_ROTATION_Z);
 const CAMERA_ROTATION_Z_SIN = Math.sin(CAMERA_ROTATION_Z);
 const FILL_COLOR_RGBA = hexToNormalizedRgba(BACKGROUND_COLOR);
@@ -374,6 +381,7 @@ function buildSceneState(seed: number): SceneState {
     worldHeight: (rows - 1) * SPACING,
     elevations,
     maxElevation,
+    terrainScreenOffset: getTerrainScreenOffset((cols - 1) * SPACING, (rows - 1) * SPACING),
     water,
     contourLayers,
     waterRow: getInitialWaterRow(rows),
@@ -427,7 +435,7 @@ function drawWaterRows(currentScene: SceneState) {
 
   push();
   applyProjection(currentScene);
-  applyTerrainTransform();
+  applyTerrainTransform(currentScene);
 
   if (retainedBackend && ensureWaterRenderResources(retainedBackend, currentScene.water)) {
     waterPoints = drawWaterRetained(retainedBackend, currentScene.water);
@@ -496,7 +504,7 @@ function drawContourLayer(currentScene: SceneState, contourLayer: ContourLayer) 
 
     push();
     applyProjection(currentScene);
-    applyTerrainTransform();
+    applyTerrainTransform(currentScene);
     const contourLineTransform = createContourLineTransform();
     pop();
 
@@ -516,7 +524,7 @@ function drawContourLayer(currentScene: SceneState, contourLayer: ContourLayer) 
 
   push();
   applyProjection(currentScene);
-  applyTerrainTransform();
+  applyTerrainTransform(currentScene);
 
   const retainedBackend = getContourRetainedBackend();
   if (retainedBackend) {
@@ -1898,12 +1906,53 @@ function getElevationIndex(col: number, row: number, cols: number) {
   return row * cols + col;
 }
 
+function getTerrainScreenOffset(worldWidth: number, worldHeight: number): TerrainScreenOffset {
+  const halfWorldWidth = worldWidth * 0.5;
+  const halfWorldHeight = worldHeight * 0.5;
+  const waterPlaneZ = LAND_THRESHOLD * ELEVATION_MULTIPLIER + VERTICAL_BIAS;
+  const corners = [
+    [-halfWorldWidth, -halfWorldHeight, waterPlaneZ],
+    [halfWorldWidth, -halfWorldHeight, waterPlaneZ],
+    [-halfWorldWidth, halfWorldHeight, waterPlaneZ],
+    [halfWorldWidth, halfWorldHeight, waterPlaneZ],
+  ] as const;
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const [x, y, z] of corners) {
+    const projected = rotateTerrainPoint(x, y, z);
+
+    minX = Math.min(minX, projected.x);
+    maxX = Math.max(maxX, projected.x);
+    minY = Math.min(minY, projected.y);
+    maxY = Math.max(maxY, projected.y);
+  }
+
+  return {
+    x: (minX + maxX) * 0.5,
+    y: (minY + maxY) * 0.5,
+  };
+}
+
+function rotateTerrainPoint(x: number, y: number, z: number) {
+  const rotatedX = x * CAMERA_ROTATION_Z_COS - y * CAMERA_ROTATION_Z_SIN;
+  const rotatedYBeforeTilt = x * CAMERA_ROTATION_Z_SIN + y * CAMERA_ROTATION_Z_COS;
+
+  return {
+    x: rotatedX,
+    y: rotatedYBeforeTilt * CAMERA_ROTATION_X_COS - z * CAMERA_ROTATION_X_SIN,
+  };
+}
+
 function applyProjection(currentScene: SceneState) {
   const depth = Math.max(currentScene.worldWidth, currentScene.worldHeight) * 2;
   ortho(-width / 2, width / 2, -height / 2, height / 2, -depth, depth);
 }
 
-function applyTerrainTransform() {
+function applyTerrainTransform(currentScene: SceneState) {
+  translate(-currentScene.terrainScreenOffset.x, -currentScene.terrainScreenOffset.y, 0);
   rotateX(CAMERA_ROTATION_X);
   rotateZ(CAMERA_ROTATION_Z);
 }
