@@ -1,201 +1,27 @@
 import './style.css';
 import type p5 from 'p5';
 import { initP5 } from './p5/init';
+import { defaultSketchConfig } from './sketch/config/defaults';
+import type { SketchCameraConfig, SketchConfig } from './sketch/config/types';
+import type {
+  ContourGeometryStats,
+  ContourLayer,
+  ContourLayerResourceSlot,
+  ContourLayerStats,
+  ContourLineTransform,
+  ContourRenderBuffer,
+  ContourRetainedBackend,
+  ContourVertexData,
+  P5RendererLike,
+  SceneProfile,
+  SceneState,
+  TerrainScreenOffset,
+  ThresholdProfile,
+  WaterRetainedBackend,
+  WaterState,
+} from './sketch/scene/types';
 
-const SPACING = 4;
-const NOISE_SCALE = 0.0085;
-const LAND_THRESHOLD = 0.47;
-const ISOLINE_INCREMENT = 0.003;
-const CONTOUR_LINE_WEIGHT = 1.25;
-
-const VERTICAL_BIAS = 0;
-const ELEVATION_MULTIPLIER = 475;
-
-const BACKGROUND_COLOR = '#fef0d9';
-const OUTLINE_COLOR = '#c0526e';
-const WATER_COLOR = '#00b4d8';
-
-const WATER_SAMPLE_STEP = 2;
-const WATER_POINT_SIZE = 1.7;
-const CAMERA_ROTATION_X = (65 * Math.PI) / 180;
-const CAMERA_ROTATION_Z = (45 * Math.PI) / 180;
-
-const TERRAIN_VIEWPORT_SCALE = 1.2;
-const TERRAIN_MIN_SIZE = 720;
-const TERRAIN_MAX_SIZE = 2000;
-const TERRAIN_PADDING = SPACING;
-const FULL_CELL_FILL_EPSILON = 0.025;
-const NOISE_OCTAVE_SUM = 1 + 0.5 + 0.25 + 0.125;
-const PROFILE_QUERY_PARAM = 'profile';
-const PROFILE_STORAGE_KEY = 'contour-profile';
-
-type RenderPhase = 'water' | 'contours' | 'complete';
-type ContourLayerReadiness = 'pending' | 'geometry-ready' | 'render-ready' | 'disposed';
-
-type ContourVertexData = number[] | Float32Array;
-
-type ContourGeometryStats = {
-  activeCellCount: number;
-  fillCellCount: number;
-  lineCellCount: number;
-  fullCellCount: number;
-  triangleCount: number;
-  segmentCount: number;
-};
-
-type ContourLayerStats = ContourGeometryStats & {
-  geometryMs: number;
-  uploadMs: number;
-  fillUploadMs: number;
-  lineUploadMs: number;
-  drawMs: number;
-  fillDrawMs: number;
-  lineDrawMs: number;
-  fillVertexCount: number;
-  lineVertexCount: number;
-};
-
-type ThresholdProfile = {
-  threshold: number;
-} & ContourLayerStats;
-
-type ContourLayerGeometry = {
-  fillVertices: ContourVertexData | null;
-  lineVertices: ContourVertexData | null;
-};
-
-type ContourLayerResourceSlot = {
-  handle: unknown;
-  dispose: (() => void) | null;
-};
-
-type ContourRenderBuffer = {
-  buffer: WebGLBuffer;
-  vertexCount: number;
-  drawMode: number;
-};
-
-type ContourRetainedBackend = {
-  gl: WebGLRenderingContext | WebGL2RenderingContext;
-  program: WebGLProgram;
-  positionLocation: number;
-  projectionMatrixLocation: WebGLUniformLocation;
-  modelViewMatrixLocation: WebGLUniformLocation;
-  colorLocation: WebGLUniformLocation;
-};
-
-type P5MatrixLike = {
-  mat4: ArrayLike<number>;
-};
-
-type P5RendererLike = {
-  uPMatrix: P5MatrixLike;
-  uMVMatrix: P5MatrixLike;
-};
-
-type ContourLineTransform = {
-  screenBasisXX: number;
-  screenBasisXY: number;
-  screenBasisYX: number;
-  screenBasisYY: number;
-  terrainBasisXX: number;
-  terrainBasisXY: number;
-  terrainBasisYX: number;
-  terrainBasisYY: number;
-};
-
-type TerrainScreenOffset = {
-  x: number;
-  y: number;
-};
-
-type ContourLayerRenderResources = {
-  fill: ContourLayerResourceSlot;
-  line: ContourLayerResourceSlot;
-};
-
-type ContourLayer = {
-  threshold: number;
-  readiness: ContourLayerReadiness;
-  geometry: ContourLayerGeometry;
-  stats: ContourLayerStats;
-  renderResources: ContourLayerRenderResources;
-};
-
-type WaterRowSlice = {
-  startVertex: number;
-  vertexCount: number;
-};
-
-type WaterGeometry = {
-  pointVertices: Float32Array | null;
-  rowSlices: Array<WaterRowSlice | null>;
-};
-
-type WaterRenderResources = {
-  points: ContourLayerResourceSlot;
-};
-
-type WaterState = {
-  geometry: WaterGeometry;
-  renderResources: WaterRenderResources;
-};
-
-type WaterRetainedBackend = {
-  gl: WebGLRenderingContext | WebGL2RenderingContext;
-  program: WebGLProgram;
-  positionLocation: number;
-  projectionMatrixLocation: WebGLUniformLocation;
-  modelViewMatrixLocation: WebGLUniformLocation;
-  colorLocation: WebGLUniformLocation;
-  pointSizeLocation: WebGLUniformLocation;
-};
-
-type SceneProfile = {
-  enabled: boolean;
-  seed: number;
-  worldSize: number;
-  cols: number;
-  rows: number;
-  totalCells: number;
-  thresholdCount: number;
-  sceneBuildMs: number;
-  elevationSampleMs: number;
-  waterDrawMs: number;
-  waterRowsDrawn: number;
-  waterPointsDrawn: number;
-  contourGeometryMs: number;
-  contourUploadMs: number;
-  contourDrawMs: number;
-  revealTotalMs: number;
-  contours: ThresholdProfile[];
-  summaryLogged: boolean;
-  startedAtMs: number;
-};
-
-type SceneState = {
-  seed: number;
-  cols: number;
-  rows: number;
-  worldWidth: number;
-  worldHeight: number;
-  elevations: Float32Array;
-  maxElevation: number;
-  terrainScreenOffset: TerrainScreenOffset;
-  water: WaterState;
-  contourLayers: ContourLayer[];
-  waterRow: number;
-  contourIndex: number;
-  phase: RenderPhase;
-  profile: SceneProfile | null;
-};
-
-declare global {
-  interface Window {
-    __CONTOUR_PROFILE__?: SceneProfile;
-    __CONTOUR_PROFILE_DEBUG__?: boolean;
-  }
-}
+const sketchConfig = defaultSketchConfig;
 
 let scene: SceneState | null = null;
 let contourRetainedBackend: ContourRetainedBackend | null = null;
@@ -245,14 +71,6 @@ void main() {
   gl_FragColor = uColor;
 }
 `;
-
-const CAMERA_ROTATION_X_COS = Math.cos(CAMERA_ROTATION_X);
-const CAMERA_ROTATION_X_SIN = Math.sin(CAMERA_ROTATION_X);
-const CAMERA_ROTATION_Z_COS = Math.cos(CAMERA_ROTATION_Z);
-const CAMERA_ROTATION_Z_SIN = Math.sin(CAMERA_ROTATION_Z);
-const FILL_COLOR_RGBA = hexToNormalizedRgba(BACKGROUND_COLOR);
-const OUTLINE_COLOR_RGBA = hexToNormalizedRgba(OUTLINE_COLOR);
-const WATER_COLOR_RGBA = hexToNormalizedRgba(WATER_COLOR);
 
 function setup() {
   const root = document.querySelector<HTMLDivElement>('#app');
@@ -316,6 +134,7 @@ function keyPressed() {
 }
 
 function resetScene(reseed: boolean) {
+  const config = sketchConfig;
   const seed = reseed || !scene ? Date.now() : scene.seed;
   const previousScene = scene;
 
@@ -323,39 +142,39 @@ function resetScene(reseed: boolean) {
   disposeSceneState(previousScene);
 
   try {
-    const nextScene = buildSceneState(seed);
+    const nextScene = buildSceneState(seed, config);
 
     scene = nextScene;
     applyProjection(nextScene);
     clear();
-    background(BACKGROUND_COLOR);
+    background(config.colors.background);
     loop();
   } catch (error) {
     destroyContourRetainedBackend();
     exposeSceneProfile(null);
     clear();
-    background(BACKGROUND_COLOR);
+    background(config.colors.background);
     noLoop();
     throw error;
   }
 }
 
-function buildSceneState(seed: number): SceneState {
-  const profile = createSceneProfile(seed);
+function buildSceneState(seed: number, config: SketchConfig): SceneState {
+  const profile = createSceneProfile(seed, config);
   const sceneBuildStart = performance.now();
 
   noiseSeed(seed);
 
-  const worldSize = getWorldSize();
-  const cols = Math.floor(worldSize / SPACING) + 1;
-  const rows = Math.floor(worldSize / SPACING) + 1;
+  const worldSize = getWorldSize(config);
+  const cols = Math.floor(worldSize / config.terrain.spacing) + 1;
+  const rows = Math.floor(worldSize / config.terrain.spacing) + 1;
   const elevations = new Float32Array(cols * rows);
   let maxElevation = 0;
   const elevationStart = performance.now();
 
   for (let row = 0; row < rows; row += 1) {
     for (let col = 0; col < cols; col += 1) {
-      const elevation = sampleLayeredElevation(col, row);
+      const elevation = sampleLayeredElevation(col, row, config);
       elevations[getElevationIndex(col, row, cols)] = elevation;
       maxElevation = Math.max(maxElevation, elevation);
     }
@@ -366,7 +185,11 @@ function buildSceneState(seed: number): SceneState {
   }
 
   const contourThresholds: number[] = [];
-  for (let threshold = LAND_THRESHOLD; threshold <= maxElevation + ISOLINE_INCREMENT * 0.5; threshold += ISOLINE_INCREMENT) {
+  for (
+    let threshold = config.contours.landThreshold;
+    threshold <= maxElevation + config.contours.isolineIncrement * 0.5;
+    threshold += config.contours.isolineIncrement
+  ) {
     contourThresholds.push(Number(threshold.toFixed(6)));
   }
 
@@ -374,17 +197,22 @@ function buildSceneState(seed: number): SceneState {
   const water = createWaterState(rows);
 
   const nextScene: SceneState = {
+    config,
     seed,
     cols,
     rows,
-    worldWidth: (cols - 1) * SPACING,
-    worldHeight: (rows - 1) * SPACING,
+    worldWidth: (cols - 1) * config.terrain.spacing,
+    worldHeight: (rows - 1) * config.terrain.spacing,
     elevations,
     maxElevation,
-    terrainScreenOffset: getTerrainScreenOffset((cols - 1) * SPACING, (rows - 1) * SPACING),
+    terrainScreenOffset: getTerrainScreenOffset(
+      (cols - 1) * config.terrain.spacing,
+      (rows - 1) * config.terrain.spacing,
+      config,
+    ),
     water,
     contourLayers,
-    waterRow: getInitialWaterRow(rows),
+    waterRow: getInitialWaterRow(rows, config),
     contourIndex: 0,
     phase: 'water',
     profile,
@@ -406,26 +234,31 @@ function buildSceneState(seed: number): SceneState {
   return nextScene;
 }
 
-function getWorldSize() {
+function getWorldSize(config: SketchConfig) {
   const viewportBase = Math.min(windowWidth, windowHeight);
-  const scaled = viewportBase * TERRAIN_VIEWPORT_SCALE;
-  const clamped = Math.min(Math.max(scaled, TERRAIN_MIN_SIZE), TERRAIN_MAX_SIZE);
-  const snapped = Math.floor(clamped / SPACING) * SPACING;
+  const scaled = viewportBase * config.terrain.viewportScale;
+  const clamped = Math.min(Math.max(scaled, config.terrain.minSize), config.terrain.maxSize);
+  const snapped = Math.floor(clamped / config.terrain.spacing) * config.terrain.spacing;
 
-  return Math.max(snapped, TERRAIN_MIN_SIZE + TERRAIN_PADDING);
+  return Math.max(snapped, config.terrain.minSize + config.terrain.padding);
 }
 
-function sampleLayeredElevation(x: number, y: number) {
-  const octave1 = sampleNoise(x, y);
-  const octave2 = sampleNoise(x * 2, y * 2);
-  const octave3 = sampleNoise(x * 4, y * 4);
-  const octave4 = sampleNoise(x * 8, y * 8);
+function sampleLayeredElevation(x: number, y: number, config: SketchConfig) {
+  const [octave1Weight, octave2Weight, octave3Weight, octave4Weight] = config.terrain.noiseOctaves;
+  const octave1 = sampleNoise(x, y, config);
+  const octave2 = sampleNoise(x * 2, y * 2, config);
+  const octave3 = sampleNoise(x * 4, y * 4, config);
+  const octave4 = sampleNoise(x * 8, y * 8, config);
+  const octaveSum = octave1Weight + octave2Weight + octave3Weight + octave4Weight;
 
-  return (octave1 + 0.5 * octave2 + 0.25 * octave3 + 0.125 * octave4) / NOISE_OCTAVE_SUM;
+  return (octave1Weight * octave1 + octave2Weight * octave2 + octave3Weight * octave3 + octave4Weight * octave4) / octaveSum;
 }
 
-function sampleNoise(x: number, y: number) {
-  return noise(x * NOISE_SCALE + 150, y * NOISE_SCALE + 150);
+function sampleNoise(x: number, y: number, config: SketchConfig) {
+  return noise(
+    x * config.terrain.noiseScale + config.terrain.noiseOffset,
+    y * config.terrain.noiseScale + config.terrain.noiseOffset,
+  );
 }
 
 function drawWaterRows(currentScene: SceneState) {
@@ -438,7 +271,7 @@ function drawWaterRows(currentScene: SceneState) {
   applyTerrainTransform(currentScene);
 
   if (retainedBackend && ensureWaterRenderResources(retainedBackend, currentScene.water)) {
-    waterPoints = drawWaterRetained(retainedBackend, currentScene.water);
+    waterPoints = drawWaterRetained(retainedBackend, currentScene);
   } else {
     waterPoints = drawWaterImmediate(currentScene);
   }
@@ -448,26 +281,27 @@ function drawWaterRows(currentScene: SceneState) {
   currentScene.waterRow = -1;
 
   if (currentScene.profile) {
-    currentScene.profile.waterRowsDrawn += getSampledWaterRowCount(currentScene.rows);
+    currentScene.profile.waterRowsDrawn += getSampledWaterRowCount(currentScene.rows, currentScene.config);
     currentScene.profile.waterPointsDrawn += waterPoints;
     currentScene.profile.waterDrawMs += performance.now() - waterStart;
   }
 }
 
 function drawWaterImmediate(currentScene: SceneState) {
-  const waterZ = LAND_THRESHOLD * ELEVATION_MULTIPLIER + VERTICAL_BIAS;
+  const { config } = currentScene;
+  const waterZ = config.contours.landThreshold * config.terrain.elevationMultiplier + config.terrain.verticalBias;
   let waterPoints = 0;
 
-  stroke(WATER_COLOR);
-  strokeWeight(WATER_POINT_SIZE);
+  stroke(config.colors.water);
+  strokeWeight(config.water.pointSize);
 
-  for (let row = getInitialWaterRow(currentScene.rows); row >= 0; row -= WATER_SAMPLE_STEP) {
-    for (let col = 0; col < currentScene.cols; col += WATER_SAMPLE_STEP) {
-      if (getElevation(currentScene, col, row) < LAND_THRESHOLD) {
+  for (let row = getInitialWaterRow(currentScene.rows, config); row >= 0; row -= config.water.sampleStep) {
+    for (let col = 0; col < currentScene.cols; col += config.water.sampleStep) {
+      if (getElevation(currentScene, col, row) < config.contours.landThreshold) {
         waterPoints += 1;
         point(
-          col * SPACING - currentScene.worldWidth / 2,
-          row * SPACING - currentScene.worldHeight / 2,
+          col * config.terrain.spacing - currentScene.worldWidth / 2,
+          row * config.terrain.spacing - currentScene.worldHeight / 2,
           waterZ,
         );
       }
@@ -505,7 +339,7 @@ function drawContourLayer(currentScene: SceneState, contourLayer: ContourLayer) 
     push();
     applyProjection(currentScene);
     applyTerrainTransform(currentScene);
-    const contourLineTransform = createContourLineTransform();
+    const contourLineTransform = createContourLineTransform(currentScene.config.camera);
     pop();
 
     for (let col = 0; col < currentScene.cols - 1; col += 1) {
@@ -534,15 +368,15 @@ function drawContourLayer(currentScene: SceneState, contourLayer: ContourLayer) 
     lineUploadMs += uploadMetrics.lineUploadMs;
 
     if (contourLayer.readiness === 'render-ready') {
-      fillDrawMs = drawContourFillRetained(retainedBackend, contourLayer);
-      lineDrawMs = drawContourLineRetained(retainedBackend, contourLayer);
+      fillDrawMs = drawContourFillRetained(retainedBackend, currentScene, contourLayer);
+      lineDrawMs = drawContourLineRetained(retainedBackend, currentScene, contourLayer);
     } else {
-      const drawMetrics = drawContourLayerImmediate(contourLayer);
+      const drawMetrics = drawContourLayerImmediate(currentScene, contourLayer);
       fillDrawMs = drawMetrics.fillDrawMs;
       lineDrawMs = drawMetrics.lineDrawMs;
     }
   } else {
-    const drawMetrics = drawContourLayerImmediate(contourLayer);
+    const drawMetrics = drawContourLayerImmediate(currentScene, contourLayer);
     fillDrawMs = drawMetrics.fillDrawMs;
     lineDrawMs = drawMetrics.lineDrawMs;
   }
@@ -609,12 +443,12 @@ function collectCellGeometry(
 
   if (caseIndex === 15) {
     geometryStats.fullCellCount += 1;
-    if (Math.abs(threshold - nw) < FULL_CELL_FILL_EPSILON) {
-      const fillZ = threshold * ELEVATION_MULTIPLIER + VERTICAL_BIAS - 1.5;
-      const x = col * SPACING - currentScene.worldWidth / 2;
-      const y = row * SPACING - currentScene.worldHeight / 2;
-      const maxX = x + SPACING;
-      const maxY = y + SPACING;
+    if (Math.abs(threshold - nw) < currentScene.config.contours.fullCellFillEpsilon) {
+      const fillZ = threshold * currentScene.config.terrain.elevationMultiplier + currentScene.config.terrain.verticalBias - 1.5;
+      const x = col * currentScene.config.terrain.spacing - currentScene.worldWidth / 2;
+      const y = row * currentScene.config.terrain.spacing - currentScene.worldHeight / 2;
+      const maxX = x + currentScene.config.terrain.spacing;
+      const maxY = y + currentScene.config.terrain.spacing;
 
       addTriangle(fillVertices, x, y, fillZ, maxX, y, fillZ, maxX, maxY, fillZ);
       addTriangle(fillVertices, x, y, fillZ, x, maxY, fillZ, maxX, maxY, fillZ);
@@ -624,11 +458,11 @@ function collectCellGeometry(
     return;
   }
 
-  const fillZ = threshold * ELEVATION_MULTIPLIER + VERTICAL_BIAS - 1.5;
-  const x = col * SPACING - currentScene.worldWidth / 2;
-  const y = row * SPACING - currentScene.worldHeight / 2;
-  const maxX = x + SPACING;
-  const maxY = y + SPACING;
+  const fillZ = threshold * currentScene.config.terrain.elevationMultiplier + currentScene.config.terrain.verticalBias - 1.5;
+  const x = col * currentScene.config.terrain.spacing - currentScene.worldWidth / 2;
+  const y = row * currentScene.config.terrain.spacing - currentScene.worldHeight / 2;
+  const maxX = x + currentScene.config.terrain.spacing;
+  const maxY = y + currentScene.config.terrain.spacing;
   const contourZ = fillZ + 1.5;
 
   let ax = 0;
@@ -679,7 +513,7 @@ function collectCellGeometry(
   switch (caseIndex) {
     case 1:
       addTriangle(fillVertices, getBottomIntersectionX(), maxY, fillZ, x, getLeftIntersectionY(), fillZ, x, maxY, fillZ);
-      addSegment(lineVertices, contourLineTransform, getBottomIntersectionX(), maxY, contourZ, x, getLeftIntersectionY(), contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getBottomIntersectionX(), maxY, contourZ, x, getLeftIntersectionY(), contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 1;
@@ -687,7 +521,7 @@ function collectCellGeometry(
       break;
     case 2:
       addTriangle(fillVertices, maxX, getRightIntersectionY(), fillZ, getBottomIntersectionX(), maxY, fillZ, maxX, maxY, fillZ);
-      addSegment(lineVertices, contourLineTransform, maxX, getRightIntersectionY(), contourZ, getBottomIntersectionX(), maxY, contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, maxX, getRightIntersectionY(), contourZ, getBottomIntersectionX(), maxY, contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 1;
@@ -696,7 +530,7 @@ function collectCellGeometry(
     case 3:
       addTriangle(fillVertices, maxX, getRightIntersectionY(), fillZ, x, getLeftIntersectionY(), fillZ, x, maxY, fillZ);
       addTriangle(fillVertices, x, maxY, fillZ, maxX, maxY, fillZ, maxX, getRightIntersectionY(), fillZ);
-      addSegment(lineVertices, contourLineTransform, maxX, getRightIntersectionY(), contourZ, x, getLeftIntersectionY(), contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, maxX, getRightIntersectionY(), contourZ, x, getLeftIntersectionY(), contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 2;
@@ -704,7 +538,7 @@ function collectCellGeometry(
       break;
     case 4:
       addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, maxX, getRightIntersectionY(), fillZ, maxX, y, fillZ);
-      addSegment(lineVertices, contourLineTransform, getTopIntersectionX(), y, contourZ, maxX, getRightIntersectionY(), contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, maxX, getRightIntersectionY(), contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 1;
@@ -715,8 +549,8 @@ function collectCellGeometry(
       addTriangle(fillVertices, getBottomIntersectionX(), maxY, fillZ, x, getLeftIntersectionY(), fillZ, x, maxY, fillZ);
       addTriangle(fillVertices, getBottomIntersectionX(), maxY, fillZ, x, getLeftIntersectionY(), fillZ, getTopIntersectionX(), y, fillZ);
       addTriangle(fillVertices, getBottomIntersectionX(), maxY, fillZ, maxX, getRightIntersectionY(), fillZ, getTopIntersectionX(), y, fillZ);
-      addSegment(lineVertices, contourLineTransform, getTopIntersectionX(), y, contourZ, x, getLeftIntersectionY(), contourZ);
-      addSegment(lineVertices, contourLineTransform, maxX, getRightIntersectionY(), contourZ, getBottomIntersectionX(), maxY, contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, x, getLeftIntersectionY(), contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, maxX, getRightIntersectionY(), contourZ, getBottomIntersectionX(), maxY, contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 4;
@@ -725,7 +559,7 @@ function collectCellGeometry(
     case 6:
       addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, getBottomIntersectionX(), maxY, fillZ, maxX, maxY, fillZ);
       addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, maxX, y, fillZ, maxX, maxY, fillZ);
-      addSegment(lineVertices, contourLineTransform, getTopIntersectionX(), y, contourZ, getBottomIntersectionX(), maxY, contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, getBottomIntersectionX(), maxY, contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 2;
@@ -735,7 +569,7 @@ function collectCellGeometry(
       addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, maxX, y, fillZ, maxX, maxY, fillZ);
       addTriangle(fillVertices, x, getLeftIntersectionY(), fillZ, x, maxY, fillZ, maxX, maxY, fillZ);
       addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, x, getLeftIntersectionY(), fillZ, maxX, maxY, fillZ);
-      addSegment(lineVertices, contourLineTransform, getTopIntersectionX(), y, contourZ, x, getLeftIntersectionY(), contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, x, getLeftIntersectionY(), contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 3;
@@ -743,7 +577,7 @@ function collectCellGeometry(
       break;
     case 8:
       addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, x, getLeftIntersectionY(), fillZ, x, y, fillZ);
-      addSegment(lineVertices, contourLineTransform, getTopIntersectionX(), y, contourZ, x, getLeftIntersectionY(), contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, x, getLeftIntersectionY(), contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 1;
@@ -752,7 +586,7 @@ function collectCellGeometry(
     case 9:
       addTriangle(fillVertices, x, y, fillZ, getTopIntersectionX(), y, fillZ, getBottomIntersectionX(), maxY, fillZ);
       addTriangle(fillVertices, x, y, fillZ, x, maxY, fillZ, getBottomIntersectionX(), maxY, fillZ);
-      addSegment(lineVertices, contourLineTransform, getTopIntersectionX(), y, contourZ, getBottomIntersectionX(), maxY, contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, getBottomIntersectionX(), maxY, contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 2;
@@ -763,8 +597,8 @@ function collectCellGeometry(
       addTriangle(fillVertices, maxX, getRightIntersectionY(), fillZ, getBottomIntersectionX(), maxY, fillZ, maxX, maxY, fillZ);
       addTriangle(fillVertices, maxX, getRightIntersectionY(), fillZ, getBottomIntersectionX(), maxY, fillZ, x, getLeftIntersectionY(), fillZ);
       addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, maxX, getRightIntersectionY(), fillZ, x, getLeftIntersectionY(), fillZ);
-      addSegment(lineVertices, contourLineTransform, getTopIntersectionX(), y, contourZ, maxX, getRightIntersectionY(), contourZ);
-      addSegment(lineVertices, contourLineTransform, getBottomIntersectionX(), maxY, contourZ, x, getLeftIntersectionY(), contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, maxX, getRightIntersectionY(), contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getBottomIntersectionX(), maxY, contourZ, x, getLeftIntersectionY(), contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 4;
@@ -774,7 +608,7 @@ function collectCellGeometry(
       addTriangle(fillVertices, x, y, fillZ, getTopIntersectionX(), y, fillZ, x, maxY, fillZ);
       addTriangle(fillVertices, maxX, getRightIntersectionY(), fillZ, maxX, maxY, fillZ, x, maxY, fillZ);
       addTriangle(fillVertices, getTopIntersectionX(), y, fillZ, maxX, getRightIntersectionY(), fillZ, x, maxY, fillZ);
-      addSegment(lineVertices, contourLineTransform, getTopIntersectionX(), y, contourZ, maxX, getRightIntersectionY(), contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getTopIntersectionX(), y, contourZ, maxX, getRightIntersectionY(), contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 3;
@@ -783,7 +617,7 @@ function collectCellGeometry(
     case 12:
       addTriangle(fillVertices, x, y, fillZ, maxX, y, fillZ, maxX, getRightIntersectionY(), fillZ);
       addTriangle(fillVertices, x, y, fillZ, x, getLeftIntersectionY(), fillZ, maxX, getRightIntersectionY(), fillZ);
-      addSegment(lineVertices, contourLineTransform, maxX, getRightIntersectionY(), contourZ, x, getLeftIntersectionY(), contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, maxX, getRightIntersectionY(), contourZ, x, getLeftIntersectionY(), contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 2;
@@ -793,7 +627,7 @@ function collectCellGeometry(
       addTriangle(fillVertices, x, y, fillZ, maxX, y, fillZ, maxX, getRightIntersectionY(), fillZ);
       addTriangle(fillVertices, x, y, fillZ, x, maxY, fillZ, getBottomIntersectionX(), maxY, fillZ);
       addTriangle(fillVertices, maxX, getRightIntersectionY(), fillZ, getBottomIntersectionX(), maxY, fillZ, x, y, fillZ);
-      addSegment(lineVertices, contourLineTransform, maxX, getRightIntersectionY(), contourZ, getBottomIntersectionX(), maxY, contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, maxX, getRightIntersectionY(), contourZ, getBottomIntersectionX(), maxY, contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 3;
@@ -803,7 +637,7 @@ function collectCellGeometry(
       addTriangle(fillVertices, x, getLeftIntersectionY(), fillZ, x, y, fillZ, maxX, y, fillZ);
       addTriangle(fillVertices, getBottomIntersectionX(), maxY, fillZ, maxX, y, fillZ, maxX, maxY, fillZ);
       addTriangle(fillVertices, getBottomIntersectionX(), maxY, fillZ, x, getLeftIntersectionY(), fillZ, maxX, y, fillZ);
-      addSegment(lineVertices, contourLineTransform, getBottomIntersectionX(), maxY, contourZ, x, getLeftIntersectionY(), contourZ);
+      addSegment(lineVertices, contourLineTransform, currentScene.config.contours.lineWeight, getBottomIntersectionX(), maxY, contourZ, x, getLeftIntersectionY(), contourZ);
       geometryStats.fillCellCount += 1;
       geometryStats.lineCellCount += 1;
       geometryStats.triangleCount += 3;
@@ -853,21 +687,22 @@ function createWaterState(rows: number): WaterState {
 }
 
 function populateWaterGeometry(currentScene: SceneState) {
+  const { config } = currentScene;
   const pointVertices: number[] = [];
   const rowSlices = currentScene.water.geometry.rowSlices;
-  const waterZ = LAND_THRESHOLD * ELEVATION_MULTIPLIER + VERTICAL_BIAS;
+  const waterZ = config.contours.landThreshold * config.terrain.elevationMultiplier + config.terrain.verticalBias;
 
-  for (let row = getInitialWaterRow(currentScene.rows); row >= 0; row -= WATER_SAMPLE_STEP) {
+  for (let row = getInitialWaterRow(currentScene.rows, config); row >= 0; row -= config.water.sampleStep) {
     const startVertex = pointVertices.length / 3;
 
-    for (let col = 0; col < currentScene.cols; col += WATER_SAMPLE_STEP) {
-      if (getElevation(currentScene, col, row) >= LAND_THRESHOLD) {
+    for (let col = 0; col < currentScene.cols; col += config.water.sampleStep) {
+      if (getElevation(currentScene, col, row) >= config.contours.landThreshold) {
         continue;
       }
 
       pointVertices.push(
-        col * SPACING - currentScene.worldWidth / 2,
-        row * SPACING - currentScene.worldHeight / 2,
+        col * config.terrain.spacing - currentScene.worldWidth / 2,
+        row * config.terrain.spacing - currentScene.worldHeight / 2,
         waterZ,
       );
     }
@@ -996,14 +831,15 @@ function disposeSceneState(currentScene: SceneState | null) {
   exposeSceneProfile(null);
 }
 
-function createSceneProfile(seed: number): SceneProfile | null {
-  if (!isProfilingEnabled()) {
+function createSceneProfile(seed: number, config: SketchConfig): SceneProfile | null {
+  if (!isProfilingEnabled(config)) {
     return null;
   }
 
   return {
     enabled: true,
     seed,
+    maxWorldSize: config.terrain.maxSize,
     worldSize: 0,
     cols: 0,
     rows: 0,
@@ -1032,12 +868,12 @@ function exposeSceneProfile(profile: SceneProfile | null) {
   }
 }
 
-function isProfilingEnabled() {
+function isProfilingEnabled(config: SketchConfig) {
   const query = new URLSearchParams(window.location.search);
 
-  return query.has(PROFILE_QUERY_PARAM)
+  return query.has(config.profile.queryParam)
     || window.__CONTOUR_PROFILE_DEBUG__ === true
-    || window.localStorage.getItem(PROFILE_STORAGE_KEY) === '1';
+    || window.localStorage.getItem(config.profile.storageKey) === '1';
 }
 
 function recordThresholdProfile(currentScene: SceneState, thresholdProfile: ThresholdProfile) {
@@ -1072,7 +908,7 @@ function logSceneProfile(profile: SceneProfile) {
     `[contour-profile] seed=${profile.seed} size=${profile.worldSize} grid=${profile.cols}x${profile.rows} thresholds=${profile.thresholdCount}`,
   );
   console.log({
-    largestSupportedWorldSize: TERRAIN_MAX_SIZE,
+    largestSupportedWorldSize: profile.maxWorldSize,
     worldSize: profile.worldSize,
     cols: profile.cols,
     rows: profile.rows,
@@ -1435,10 +1271,10 @@ function uploadContourLayerResource(
   return performance.now() - uploadStart;
 }
 
-function drawContourFillRetained(backend: ContourRetainedBackend, contourLayer: ContourLayer) {
+function drawContourFillRetained(backend: ContourRetainedBackend, currentScene: SceneState, contourLayer: ContourLayer) {
   const renderer = getP5Renderer();
   if (!renderer) {
-    return drawContourFillImmediate(contourLayer);
+    return drawContourFillImmediate(currentScene, contourLayer);
   }
 
   const { gl } = backend;
@@ -1460,10 +1296,10 @@ function drawContourFillRetained(backend: ContourRetainedBackend, contourLayer: 
 
   if (fillHandle) {
     const fillStart = performance.now();
-    drawContourRenderBuffer(backend, fillHandle, FILL_COLOR_RGBA);
+    drawContourRenderBuffer(backend, fillHandle, hexToNormalizedRgba(currentScene.config.colors.background));
     fillDrawMs = performance.now() - fillStart;
   } else {
-    fillDrawMs = drawContourFillImmediate(contourLayer);
+    fillDrawMs = drawContourFillImmediate(currentScene, contourLayer);
   }
 
   if (previousArrayBuffer) {
@@ -1485,10 +1321,10 @@ function drawContourFillRetained(backend: ContourRetainedBackend, contourLayer: 
   return fillDrawMs;
 }
 
-function drawContourLineRetained(backend: ContourRetainedBackend, contourLayer: ContourLayer) {
+function drawContourLineRetained(backend: ContourRetainedBackend, currentScene: SceneState, contourLayer: ContourLayer) {
   const renderer = getP5Renderer();
   if (!renderer) {
-    return drawContourLineImmediate(contourLayer);
+    return drawContourLineImmediate(currentScene, contourLayer);
   }
 
   const { gl } = backend;
@@ -1510,10 +1346,10 @@ function drawContourLineRetained(backend: ContourRetainedBackend, contourLayer: 
 
   if (lineHandle) {
     const lineStart = performance.now();
-    drawContourRenderBuffer(backend, lineHandle, OUTLINE_COLOR_RGBA);
+    drawContourRenderBuffer(backend, lineHandle, hexToNormalizedRgba(currentScene.config.colors.outline));
     lineDrawMs = performance.now() - lineStart;
   } else {
-    lineDrawMs = drawContourLineImmediate(contourLayer);
+    lineDrawMs = drawContourLineImmediate(currentScene, contourLayer);
   }
 
   if (previousArrayBuffer) {
@@ -1551,10 +1387,10 @@ function drawContourRenderBuffer(
 
 function drawWaterRetained(
   backend: WaterRetainedBackend,
-  water: WaterState,
+  currentScene: SceneState,
 ) {
   const renderer = getP5Renderer();
-  const handle = water.renderResources.points.handle as ContourRenderBuffer | null;
+  const handle = currentScene.water.renderResources.points.handle as ContourRenderBuffer | null;
 
   if (!renderer || !handle) {
     return 0;
@@ -1564,12 +1400,12 @@ function drawWaterRetained(
   const previousProgram = gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null;
   const previousArrayBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING) as WebGLBuffer | null;
   const wasPositionAttribEnabled = Boolean(gl.getVertexAttrib(backend.positionLocation, gl.VERTEX_ATTRIB_ARRAY_ENABLED));
-  const pointSize = Math.max(1, WATER_POINT_SIZE * pixelDensity());
+  const pointSize = Math.max(1, currentScene.config.water.pointSize * pixelDensity());
 
   gl.useProgram(backend.program);
   gl.uniformMatrix4fv(backend.projectionMatrixLocation, false, toFloat32Array(renderer.uPMatrix.mat4));
   gl.uniformMatrix4fv(backend.modelViewMatrixLocation, false, toFloat32Array(renderer.uMVMatrix.mat4));
-  gl.uniform4fv(backend.colorLocation, WATER_COLOR_RGBA);
+  gl.uniform4fv(backend.colorLocation, hexToNormalizedRgba(currentScene.config.colors.water));
   gl.uniform1f(backend.pointSizeLocation, pointSize);
   gl.bindBuffer(gl.ARRAY_BUFFER, handle.buffer);
   gl.enableVertexAttribArray(backend.positionLocation);
@@ -1591,9 +1427,9 @@ function drawWaterRetained(
   return handle.vertexCount;
 }
 
-function drawContourLayerImmediate(contourLayer: ContourLayer) {
-  const fillDrawMs = drawContourFillImmediate(contourLayer);
-  const lineDrawMs = drawContourLineImmediate(contourLayer);
+function drawContourLayerImmediate(currentScene: SceneState, contourLayer: ContourLayer) {
+  const fillDrawMs = drawContourFillImmediate(currentScene, contourLayer);
+  const lineDrawMs = drawContourLineImmediate(currentScene, contourLayer);
 
   return {
     fillDrawMs,
@@ -1601,13 +1437,13 @@ function drawContourLayerImmediate(contourLayer: ContourLayer) {
   };
 }
 
-function drawContourFillImmediate(contourLayer: ContourLayer) {
+function drawContourFillImmediate(currentScene: SceneState, contourLayer: ContourLayer) {
   if (!contourLayer.geometry.fillVertices || contourLayer.geometry.fillVertices.length === 0) {
     return 0;
   }
 
   noStroke();
-  fill(BACKGROUND_COLOR);
+  fill(currentScene.config.colors.background);
   const fillStart = performance.now();
   beginShape(TRIANGLES);
   emitVertices(contourLayer.geometry.fillVertices);
@@ -1616,13 +1452,13 @@ function drawContourFillImmediate(contourLayer: ContourLayer) {
   return performance.now() - fillStart;
 }
 
-function drawContourLineImmediate(contourLayer: ContourLayer) {
+function drawContourLineImmediate(currentScene: SceneState, contourLayer: ContourLayer) {
   if (!contourLayer.geometry.lineVertices || contourLayer.geometry.lineVertices.length === 0) {
     return 0;
   }
 
   noStroke();
-  fill(OUTLINE_COLOR);
+  fill(currentScene.config.colors.outline);
   const lineStart = performance.now();
   beginShape(TRIANGLES);
   emitVertices(contourLayer.geometry.lineVertices);
@@ -1701,6 +1537,7 @@ function addTriangle(
 function addSegment(
   vertices: number[],
   contourLineTransform: ContourLineTransform,
+  lineWeight: number,
   ax: number,
   ay: number,
   az: number,
@@ -1718,7 +1555,7 @@ function addSegment(
     return;
   }
 
-  const halfWidth = CONTOUR_LINE_WEIGHT * 0.5;
+  const halfWidth = lineWeight * 0.5;
   const directionScreenX = screenDx / screenLength;
   const directionScreenY = screenDy / screenLength;
   const normalScreenX = -directionScreenY;
@@ -1764,11 +1601,11 @@ function hasContourVertices(vertices: ContourVertexData | null) {
   return Boolean(vertices && vertices.length > 0);
 }
 
-function createContourLineTransform() {
+function createContourLineTransform(camera: SketchCameraConfig) {
   const renderer = getP5Renderer();
 
   if (!renderer) {
-    return createFallbackContourLineTransform();
+    return createFallbackContourLineTransform(camera);
   }
 
   const projectionMatrix = toFloat32Array(renderer.uPMatrix.mat4);
@@ -1786,11 +1623,12 @@ function createContourLineTransform() {
   );
 }
 
-function createFallbackContourLineTransform() {
-  const screenBasisXX = CAMERA_ROTATION_Z_COS;
-  const screenBasisXY = CAMERA_ROTATION_Z_SIN;
-  const screenBasisYX = -CAMERA_ROTATION_Z_SIN * CAMERA_ROTATION_X_COS;
-  const screenBasisYY = CAMERA_ROTATION_Z_COS * CAMERA_ROTATION_X_COS;
+function createFallbackContourLineTransform(camera: SketchCameraConfig) {
+  const derivedCamera = getDerivedCamera(camera);
+  const screenBasisXX = derivedCamera.rotationZCos;
+  const screenBasisXY = derivedCamera.rotationZSin;
+  const screenBasisYX = -derivedCamera.rotationZSin * derivedCamera.rotationXCos;
+  const screenBasisYY = derivedCamera.rotationZCos * derivedCamera.rotationXCos;
 
   return createContourLineTransformFromBasis(screenBasisXX, screenBasisXY, screenBasisYX, screenBasisYY);
 }
@@ -1892,24 +1730,24 @@ function getElevation(currentScene: SceneState, col: number, row: number) {
   return currentScene.elevations[getElevationIndex(col, row, currentScene.cols)];
 }
 
-function getInitialWaterRow(rows: number) {
-  return rows - 1 - ((rows - 1) % WATER_SAMPLE_STEP);
+function getInitialWaterRow(rows: number, config: SketchConfig) {
+  return rows - 1 - ((rows - 1) % config.water.sampleStep);
 }
 
-function getSampledWaterRowCount(rows: number) {
-  const initialWaterRow = getInitialWaterRow(rows);
+function getSampledWaterRowCount(rows: number, config: SketchConfig) {
+  const initialWaterRow = getInitialWaterRow(rows, config);
 
-  return initialWaterRow < 0 ? 0 : Math.floor(initialWaterRow / WATER_SAMPLE_STEP) + 1;
+  return initialWaterRow < 0 ? 0 : Math.floor(initialWaterRow / config.water.sampleStep) + 1;
 }
 
 function getElevationIndex(col: number, row: number, cols: number) {
   return row * cols + col;
 }
 
-function getTerrainScreenOffset(worldWidth: number, worldHeight: number): TerrainScreenOffset {
+function getTerrainScreenOffset(worldWidth: number, worldHeight: number, config: SketchConfig): TerrainScreenOffset {
   const halfWorldWidth = worldWidth * 0.5;
   const halfWorldHeight = worldHeight * 0.5;
-  const waterPlaneZ = LAND_THRESHOLD * ELEVATION_MULTIPLIER + VERTICAL_BIAS;
+  const waterPlaneZ = config.contours.landThreshold * config.terrain.elevationMultiplier + config.terrain.verticalBias;
   const corners = [
     [-halfWorldWidth, -halfWorldHeight, waterPlaneZ],
     [halfWorldWidth, -halfWorldHeight, waterPlaneZ],
@@ -1922,7 +1760,7 @@ function getTerrainScreenOffset(worldWidth: number, worldHeight: number): Terrai
   let maxY = Number.NEGATIVE_INFINITY;
 
   for (const [x, y, z] of corners) {
-    const projected = rotateTerrainPoint(x, y, z);
+    const projected = rotateTerrainPoint(x, y, z, config.camera);
 
     minX = Math.min(minX, projected.x);
     maxX = Math.max(maxX, projected.x);
@@ -1936,13 +1774,14 @@ function getTerrainScreenOffset(worldWidth: number, worldHeight: number): Terrai
   };
 }
 
-function rotateTerrainPoint(x: number, y: number, z: number) {
-  const rotatedX = x * CAMERA_ROTATION_Z_COS - y * CAMERA_ROTATION_Z_SIN;
-  const rotatedYBeforeTilt = x * CAMERA_ROTATION_Z_SIN + y * CAMERA_ROTATION_Z_COS;
+function rotateTerrainPoint(x: number, y: number, z: number, camera: SketchCameraConfig) {
+  const derivedCamera = getDerivedCamera(camera);
+  const rotatedX = x * derivedCamera.rotationZCos - y * derivedCamera.rotationZSin;
+  const rotatedYBeforeTilt = x * derivedCamera.rotationZSin + y * derivedCamera.rotationZCos;
 
   return {
     x: rotatedX,
-    y: rotatedYBeforeTilt * CAMERA_ROTATION_X_COS - z * CAMERA_ROTATION_X_SIN,
+    y: rotatedYBeforeTilt * derivedCamera.rotationXCos - z * derivedCamera.rotationXSin,
   };
 }
 
@@ -1953,8 +1792,17 @@ function applyProjection(currentScene: SceneState) {
 
 function applyTerrainTransform(currentScene: SceneState) {
   translate(-currentScene.terrainScreenOffset.x, -currentScene.terrainScreenOffset.y, 0);
-  rotateX(CAMERA_ROTATION_X);
-  rotateZ(CAMERA_ROTATION_Z);
+  rotateX(currentScene.config.camera.rotationX);
+  rotateZ(currentScene.config.camera.rotationZ);
+}
+
+function getDerivedCamera(camera: SketchCameraConfig) {
+  return {
+    rotationXCos: Math.cos(camera.rotationX),
+    rotationXSin: Math.sin(camera.rotationX),
+    rotationZCos: Math.cos(camera.rotationZ),
+    rotationZSin: Math.sin(camera.rotationZ),
+  };
 }
 
 initP5({ setup, draw, windowResized, keyPressed });
