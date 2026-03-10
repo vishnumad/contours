@@ -38,7 +38,7 @@ void main() {
 `;
 
 export type WaterRenderer = {
-  draw: (scene: SceneState) => number;
+  draw: (scene: SceneState) => void;
   dispose: () => void;
 };
 
@@ -117,10 +117,11 @@ export function createWaterRenderer(renderContext: SketchRenderContext): WaterRe
       const retainedBackend = getWaterRetainedBackend();
 
       if (retainedBackend && ensureWaterRenderResources(retainedBackend, currentScene.water)) {
-        return drawWaterRetained(retainedBackend, currentScene, renderContext);
+        drawWaterRetained(retainedBackend, currentScene, renderContext);
+        return;
       }
 
-      return drawWaterImmediate(currentScene, renderContext);
+      drawWaterImmediate(currentScene, renderContext);
     },
     dispose() {
       destroyWaterRetainedBackend();
@@ -254,7 +255,7 @@ function drawWaterRetained(
   const handle = currentScene.water.renderResources.points.handle as ContourRenderBuffer | null;
 
   if (!renderer || !handle) {
-    return 0;
+    return;
   }
 
   const { gl } = backend;
@@ -284,8 +285,6 @@ function drawWaterRetained(
   }
 
   gl.useProgram(previousProgram);
-
-  return handle.vertexCount;
 }
 
 function disposeRenderResourceSlot(resourceSlot: ContourLayerResourceSlot) {

@@ -32,18 +32,8 @@ void main() {
 }
 `;
 
-export type ContourRenderMetrics = {
-  uploadMs: number;
-  fillUploadMs: number;
-  lineUploadMs: number;
-  fillDrawMs: number;
-  lineDrawMs: number;
-  fillVertexCount: number;
-  lineVertexCount: number;
-};
-
 export type ContourRenderer = {
-  drawLayer: (scene: SceneState, contourLayer: ContourLayer) => ContourRenderMetrics;
+  drawLayer: (scene: SceneState, contourLayer: ContourLayer) => void;
   dispose: () => void;
 };
 
@@ -117,49 +107,19 @@ export function createContourRenderer(renderContext: SketchRenderContext): Conto
   return {
     drawLayer(currentScene: SceneState, contourLayer: ContourLayer) {
       const retainedBackend = getContourRetainedBackend();
-      let uploadMs = 0;
-      let fillUploadMs = 0;
-      let lineUploadMs = 0;
-      let fillDrawMs = 0;
-      let lineDrawMs = 0;
 
       if (retainedBackend) {
-        const uploadMetrics = ensureContourLayerRenderResources(retainedBackend, contourLayer);
-        uploadMs += uploadMetrics.uploadMs;
-        fillUploadMs += uploadMetrics.fillUploadMs;
-        lineUploadMs += uploadMetrics.lineUploadMs;
+        ensureContourLayerRenderResources(retainedBackend, contourLayer);
 
         if (contourLayer.readiness === 'render-ready') {
-          fillDrawMs = drawContourFillRetained(retainedBackend, currentScene, contourLayer, renderContext);
-          lineDrawMs = drawContourLineRetained(retainedBackend, currentScene, contourLayer, renderContext);
+          drawContourFillRetained(retainedBackend, currentScene, contourLayer, renderContext);
+          drawContourLineRetained(retainedBackend, currentScene, contourLayer, renderContext);
         } else {
-          const drawMetrics = drawContourLayerImmediate(currentScene, contourLayer, renderContext);
-          fillDrawMs = drawMetrics.fillDrawMs;
-          lineDrawMs = drawMetrics.lineDrawMs;
+          drawContourLayerImmediate(currentScene, contourLayer, renderContext);
         }
       } else {
-        const drawMetrics = drawContourLayerImmediate(currentScene, contourLayer, renderContext);
-        fillDrawMs = drawMetrics.fillDrawMs;
-        lineDrawMs = drawMetrics.lineDrawMs;
+        drawContourLayerImmediate(currentScene, contourLayer, renderContext);
       }
-
-      return {
-        uploadMs,
-        fillUploadMs,
-        lineUploadMs,
-        fillDrawMs,
-        lineDrawMs,
-        fillVertexCount: getContourLayerVertexCount(
-          contourLayer.renderResources.fill,
-          contourLayer.geometry.fillVertices,
-          contourLayer.stats.fillVertexCount,
-        ),
-        lineVertexCount: getContourLayerVertexCount(
-          contourLayer.renderResources.line,
-          contourLayer.geometry.lineVertices,
-          contourLayer.stats.lineVertexCount,
-        ),
-      };
     },
     dispose() {
       destroyContourRetainedBackend();
@@ -232,20 +192,16 @@ function ensureContourLayerRenderResources(
   contourLayer: ContourLayer,
 ) {
   if (contourLayer.readiness !== 'geometry-ready') {
-    return {
-      uploadMs: 0,
-      fillUploadMs: 0,
-      lineUploadMs: 0,
-    };
+    return;
   }
 
-  const fillUploadMs = uploadContourLayerResource(
+  uploadContourLayerResource(
     backend.gl,
     contourLayer.renderResources.fill,
     contourLayer.geometry.fillVertices,
     backend.gl.TRIANGLES,
   );
-  const lineUploadMs = uploadContourLayerResource(
+  uploadContourLayerResource(
     backend.gl,
     contourLayer.renderResources.line,
     contourLayer.geometry.lineVertices,
@@ -258,12 +214,6 @@ function ensureContourLayerRenderResources(
   if (fillReady && lineReady) {
     markContourLayerRenderReady(contourLayer);
   }
-
-  return {
-    uploadMs: fillUploadMs + lineUploadMs,
-    fillUploadMs,
-    lineUploadMs,
-  };
 }
 
 function uploadContourLayerResource(
@@ -275,16 +225,15 @@ function uploadContourLayerResource(
   disposeContourLayerResourceSlot(resourceSlot);
 
   if (!vertices || vertices.length === 0) {
-    return 0;
+    return;
   }
 
   const buffer = gl.createBuffer();
   if (!buffer) {
-    return 0;
+    return;
   }
 
   const data = vertices instanceof Float32Array ? vertices : new Float32Array(vertices);
-  const uploadStart = performance.now();
 
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
   gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
@@ -300,8 +249,6 @@ function uploadContourLayerResource(
   resourceSlot.dispose = () => {
     gl.deleteBuffer(buffer);
   };
-
-  return performance.now() - uploadStart;
 }
 
 function drawContourFillRetained(
@@ -312,7 +259,8 @@ function drawContourFillRetained(
 ) {
   const renderer = renderContext.getRenderer();
   if (!renderer) {
-    return drawContourFillImmediate(currentScene, contourLayer, renderContext);
+    drawContourFillImmediate(currentScene, contourLayer, renderContext);
+    return;
   }
 
   const { gl } = backend;
@@ -330,14 +278,10 @@ function drawContourFillRetained(
   gl.uniformMatrix4fv(backend.projectionMatrixLocation, false, toFloat32Array(renderer.uPMatrix.mat4));
   gl.uniformMatrix4fv(backend.modelViewMatrixLocation, false, toFloat32Array(renderer.uMVMatrix.mat4));
 
-  let fillDrawMs = 0;
-
   if (fillHandle) {
-    const fillStart = performance.now();
     drawContourRenderBuffer(backend, fillHandle, hexToNormalizedRgba(currentScene.config.colors.background));
-    fillDrawMs = performance.now() - fillStart;
   } else {
-    fillDrawMs = drawContourFillImmediate(currentScene, contourLayer, renderContext);
+    drawContourFillImmediate(currentScene, contourLayer, renderContext);
   }
 
   if (previousArrayBuffer) {
@@ -355,8 +299,6 @@ function drawContourFillRetained(
   if (wasCullFaceEnabled) {
     gl.enable(gl.CULL_FACE);
   }
-
-  return fillDrawMs;
 }
 
 function drawContourLineRetained(
@@ -367,7 +309,8 @@ function drawContourLineRetained(
 ) {
   const renderer = renderContext.getRenderer();
   if (!renderer) {
-    return drawContourLineImmediate(currentScene, contourLayer, renderContext);
+    drawContourLineImmediate(currentScene, contourLayer, renderContext);
+    return;
   }
 
   const { gl } = backend;
@@ -385,14 +328,10 @@ function drawContourLineRetained(
   gl.uniformMatrix4fv(backend.projectionMatrixLocation, false, toFloat32Array(renderer.uPMatrix.mat4));
   gl.uniformMatrix4fv(backend.modelViewMatrixLocation, false, toFloat32Array(renderer.uMVMatrix.mat4));
 
-  let lineDrawMs = 0;
-
   if (lineHandle) {
-    const lineStart = performance.now();
     drawContourRenderBuffer(backend, lineHandle, hexToNormalizedRgba(currentScene.config.colors.outline));
-    lineDrawMs = performance.now() - lineStart;
   } else {
-    lineDrawMs = drawContourLineImmediate(currentScene, contourLayer, renderContext);
+    drawContourLineImmediate(currentScene, contourLayer, renderContext);
   }
 
   if (previousArrayBuffer) {
@@ -410,8 +349,6 @@ function drawContourLineRetained(
   if (wasCullFaceEnabled) {
     gl.enable(gl.CULL_FACE);
   }
-
-  return lineDrawMs;
 }
 
 function drawContourRenderBuffer(
@@ -426,23 +363,6 @@ function drawContourRenderBuffer(
   gl.vertexAttribPointer(backend.positionLocation, 3, gl.FLOAT, false, 0, 0);
   gl.uniform4fv(backend.colorLocation, color);
   gl.drawArrays(handle.drawMode, 0, handle.vertexCount);
-}
-
-function getContourLayerVertexCount(
-  resourceSlot: ContourLayerResourceSlot,
-  vertices: ContourVertexData | null,
-  fallbackCount: number,
-) {
-  if (vertices) {
-    return vertices.length / 3;
-  }
-
-  const handle = resourceSlot.handle as ContourRenderBuffer | null;
-  if (handle) {
-    return handle.vertexCount;
-  }
-
-  return fallbackCount;
 }
 
 function isWebGLContext(

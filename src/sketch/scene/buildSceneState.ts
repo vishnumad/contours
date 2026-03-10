@@ -1,5 +1,5 @@
 import type { SketchConfig } from '../config/types';
-import type { SceneProfile, SceneState } from './types';
+import type { SceneState } from './types';
 import { getTerrainScreenOffset } from '../terrain/projection';
 import {
   getElevationIndex,
@@ -18,8 +18,6 @@ export type BuildSceneStateOptions = {
   };
   noiseSeed: (seed: number) => void;
   noise: (x: number, y: number) => number;
-  createSceneProfile: (seed: number, config: SketchConfig) => SceneProfile | null;
-  exposeSceneProfile: (profile: SceneProfile | null) => void;
   createContourLayer: (threshold: number) => SceneState['contourLayers'][number];
 };
 
@@ -43,13 +41,8 @@ export function buildSceneState({
   viewportSize,
   noiseSeed,
   noise,
-  createSceneProfile,
-  exposeSceneProfile,
   createContourLayer,
 }: BuildSceneStateOptions): SceneState {
-  const profile = createSceneProfile(seed, config);
-  const sceneBuildStart = performance.now();
-
   noiseSeed(seed);
 
   const worldSize = getWorldSize(config, viewportSize);
@@ -57,7 +50,6 @@ export function buildSceneState({
   const rows = Math.floor(worldSize / config.terrain.spacing) + 1;
   const elevations = new Float32Array(cols * rows);
   let maxElevation = 0;
-  const elevationStart = performance.now();
 
   for (let row = 0; row < rows; row += 1) {
     for (let col = 0; col < cols; col += 1) {
@@ -65,10 +57,6 @@ export function buildSceneState({
       elevations[getElevationIndex(col, row, cols)] = elevation;
       maxElevation = Math.max(maxElevation, elevation);
     }
-  }
-
-  if (profile) {
-    profile.elevationSampleMs = performance.now() - elevationStart;
   }
 
   const contourThresholds = createContourThresholds(maxElevation, config);
@@ -94,21 +82,9 @@ export function buildSceneState({
     waterRow: getInitialWaterRow(rows, config),
     contourIndex: 0,
     phase: 'water',
-    profile,
   };
 
   populateWaterGeometry(nextScene);
-
-  if (profile) {
-    profile.worldSize = worldSize;
-    profile.cols = cols;
-    profile.rows = rows;
-    profile.totalCells = (cols - 1) * (rows - 1);
-    profile.thresholdCount = contourLayers.length;
-    profile.sceneBuildMs = performance.now() - sceneBuildStart;
-  }
-
-  exposeSceneProfile(profile);
 
   return nextScene;
 }

@@ -1,11 +1,9 @@
 import './style.css';
 import { initP5 } from './p5/init';
 import {
-  createContourGeometryStats,
   createContourLayer,
   disposeContourLayer,
   updateContourLayerGeometry,
-  updateContourLayerStats,
 } from './sketch/contours/layer';
 import { createContourLineTransform } from './sketch/contours/lineTransform';
 import { collectCellGeometry } from './sketch/contours/marchingSquares';
@@ -13,11 +11,9 @@ import { createContourRenderer } from './sketch/contours/renderRetained';
 import { createSketchController } from './sketch/config/controller';
 import type { SketchControllerEvent } from './sketch/config/controller';
 import { defaultSketchConfig } from './sketch/config/defaults';
-import { createSceneProfile, exposeSceneProfile, finalizeSceneProfile, recordThresholdProfile } from './sketch/profile/sceneProfile';
 import { createSketchRenderContext } from './sketch/runtime/renderContext';
 import { buildSceneState } from './sketch/scene/buildSceneState';
-import type { ContourLayer, ContourLayerStats, SceneState } from './sketch/scene/types';
-import { getSampledWaterRowCount } from './sketch/terrain/elevation';
+import type { ContourLayer, SceneState } from './sketch/scene/types';
 import { disposeWaterState } from './sketch/water/geometry';
 import { createWaterRenderer } from './sketch/water/renderRetained';
 
@@ -66,7 +62,6 @@ function draw() {
   if (scene.phase === 'contours') {
     if (scene.contourIndex >= scene.contourLayers.length) {
       scene.phase = 'complete';
-      finalizeSceneProfile(scene);
       noLoop();
       return;
     }
@@ -76,7 +71,6 @@ function draw() {
 
     if (scene.contourIndex >= scene.contourLayers.length) {
       scene.phase = 'complete';
-      finalizeSceneProfile(scene);
       noLoop();
     }
   }
@@ -113,23 +107,15 @@ function applyConfigChange(event: Extract<SketchControllerEvent, { type: 'config
 }
 
 function drawWaterRows(currentScene: SceneState) {
-  const waterStart = performance.now();
-
   push();
   applyProjection(currentScene);
   applyTerrainTransform(currentScene);
 
-  const waterPoints = waterRenderer.draw(currentScene);
+  waterRenderer.draw(currentScene);
 
   pop();
 
   currentScene.waterRow = -1;
-
-  if (currentScene.profile) {
-    currentScene.profile.waterRowsDrawn += getSampledWaterRowCount(currentScene.rows, currentScene.config);
-    currentScene.profile.waterPointsDrawn += waterPoints;
-    currentScene.profile.waterDrawMs += performance.now() - waterStart;
-  }
 }
 
 function resetScene(reseed: boolean, explicitSeed?: number) {
@@ -147,8 +133,6 @@ function resetScene(reseed: boolean, explicitSeed?: number) {
       viewportSize: renderContext.getSize(),
       noiseSeed,
       noise,
-      createSceneProfile,
-      exposeSceneProfile,
       createContourLayer,
     });
 
@@ -160,7 +144,6 @@ function resetScene(reseed: boolean, explicitSeed?: number) {
   } catch (error) {
     contourRenderer.dispose();
     waterRenderer.dispose();
-    exposeSceneProfile(null);
     clear();
     background(config.colors.background);
     noLoop();
@@ -174,24 +157,10 @@ function drawContourLayer(currentScene: SceneState, contourLayer: ContourLayer) 
   }
 
   const { threshold } = contourLayer;
-  let geometryMs = contourLayer.stats.geometryMs;
-  let uploadMs = contourLayer.stats.uploadMs;
-  let fillUploadMs = contourLayer.stats.fillUploadMs;
-  let lineUploadMs = contourLayer.stats.lineUploadMs;
-  let geometryStats = {
-    activeCellCount: contourLayer.stats.activeCellCount,
-    fillCellCount: contourLayer.stats.fillCellCount,
-    lineCellCount: contourLayer.stats.lineCellCount,
-    fullCellCount: contourLayer.stats.fullCellCount,
-    triangleCount: contourLayer.stats.triangleCount,
-    segmentCount: contourLayer.stats.segmentCount,
-  };
 
   if (contourLayer.readiness === 'pending') {
     const fillVertices: number[] = [];
     const lineVertices: number[] = [];
-    geometryStats = createContourGeometryStats();
-    const geometryStart = performance.now();
 
     push();
     applyProjection(currentScene);
@@ -201,54 +170,19 @@ function drawContourLayer(currentScene: SceneState, contourLayer: ContourLayer) 
 
     for (let col = 0; col < currentScene.cols - 1; col += 1) {
       for (let row = 0; row < currentScene.rows - 1; row += 1) {
-        collectCellGeometry(currentScene, threshold, col, row, fillVertices, lineVertices, geometryStats, contourLineTransform);
+        collectCellGeometry(currentScene, threshold, col, row, fillVertices, lineVertices, contourLineTransform);
       }
     }
 
-    geometryMs = performance.now() - geometryStart;
     updateContourLayerGeometry(contourLayer, new Float32Array(fillVertices), new Float32Array(lineVertices));
   }
-
-  let fillDrawMs = 0;
-  let lineDrawMs = 0;
-  const drawStart = performance.now();
 
   push();
   applyProjection(currentScene);
   applyTerrainTransform(currentScene);
-  const renderMetrics = contourRenderer.drawLayer(currentScene, contourLayer);
-  uploadMs += renderMetrics.uploadMs;
-  fillUploadMs += renderMetrics.fillUploadMs;
-  lineUploadMs += renderMetrics.lineUploadMs;
-  fillDrawMs = renderMetrics.fillDrawMs;
-  lineDrawMs = renderMetrics.lineDrawMs;
+  contourRenderer.drawLayer(currentScene, contourLayer);
 
   pop();
-
-  const drawMs = performance.now() - drawStart;
-  const stats: ContourLayerStats = {
-    geometryMs,
-    uploadMs,
-    fillUploadMs,
-    lineUploadMs,
-    drawMs,
-    fillDrawMs,
-    lineDrawMs,
-    fillVertexCount: renderMetrics.fillVertexCount,
-    lineVertexCount: renderMetrics.lineVertexCount,
-    activeCellCount: geometryStats.activeCellCount,
-    fillCellCount: geometryStats.fillCellCount,
-    lineCellCount: geometryStats.lineCellCount,
-    fullCellCount: geometryStats.fullCellCount,
-    triangleCount: geometryStats.triangleCount,
-    segmentCount: geometryStats.segmentCount,
-  };
-
-  updateContourLayerStats(contourLayer, stats);
-  recordThresholdProfile(currentScene, {
-    threshold,
-    ...stats,
-  });
 }
 
 function disposeSceneState(currentScene: SceneState | null) {
@@ -268,11 +202,9 @@ function disposeSceneState(currentScene: SceneState | null) {
   currentScene.waterRow = -1;
   currentScene.contourIndex = 0;
   currentScene.phase = 'complete';
-  currentScene.profile = null;
 
   contourRenderer.dispose();
   waterRenderer.dispose();
-  exposeSceneProfile(null);
 }
 
 function exposeSketchController() {

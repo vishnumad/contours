@@ -46,9 +46,3 @@ export function getElevation(currentScene: Pick<SceneState, 'elevations' | 'cols
 export function getInitialWaterRow(rows: number, config: SketchConfig) {
   return rows - 1 - ((rows - 1) % config.water.sampleStep);
 }
-
-export function getSampledWaterRowCount(rows: number, config: SketchConfig) {
-  const initialWaterRow = getInitialWaterRow(rows, config);
-
-  return initialWaterRow < 0 ? 0 : Math.floor(initialWaterRow / config.water.sampleStep) + 1;
-}

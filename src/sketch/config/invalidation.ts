@@ -20,7 +20,6 @@ function getChangedPaths(previousConfig: SketchConfig, nextConfig: SketchConfig)
   compareSection('water', previousConfig.water, nextConfig.water, changedPaths);
   compareSection('camera', previousConfig.camera, nextConfig.camera, changedPaths);
   compareSection('colors', previousConfig.colors, nextConfig.colors, changedPaths);
-  compareSection('profile', previousConfig.profile, nextConfig.profile, changedPaths);
 
   return changedPaths;
 }

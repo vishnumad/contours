@@ -32,8 +32,4 @@ export const defaultSketchConfig: SketchConfig = {
     outline: '#c0526e',
     water: '#00b4d8',
   },
-  profile: {
-    queryParam: 'profile',
-    storageKey: 'contour-profile',
-  },
 };

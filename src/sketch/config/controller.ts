@@ -95,7 +95,6 @@ function cloneConfig(config: SketchConfig): SketchConfig {
     water: { ...config.water },
     camera: { ...config.camera },
     colors: { ...config.colors },
-    profile: { ...config.profile },
   };
 }
 
@@ -120,10 +119,6 @@ function mergeConfig(config: SketchConfig, patch: DeepPartial<SketchConfig>): Sk
     colors: {
       ...config.colors,
       ...omitUndefined(patch.colors),
-    },
-    profile: {
-      ...config.profile,
-      ...omitUndefined(patch.profile),
     },
   };
 }

@@ -34,11 +34,6 @@ export type SketchColorsConfig = {
   water: string;
 };
 
-export type SketchProfileConfig = {
-  queryParam: string;
-  storageKey: string;
-};
-
 export type DeepPartial<T> = T extends readonly unknown[]
   ? T
   : T extends object
@@ -63,5 +58,4 @@ export type SketchConfig = {
   water: SketchWaterConfig;
   camera: SketchCameraConfig;
   colors: SketchColorsConfig;
-  profile: SketchProfileConfig;
 };

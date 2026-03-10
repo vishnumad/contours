@@ -5,31 +5,6 @@ export type ContourLayerReadiness = 'pending' | 'geometry-ready' | 'render-ready
 
 export type ContourVertexData = number[] | Float32Array;
 
-export type ContourGeometryStats = {
-  activeCellCount: number;
-  fillCellCount: number;
-  lineCellCount: number;
-  fullCellCount: number;
-  triangleCount: number;
-  segmentCount: number;
-};
-
-export type ContourLayerStats = ContourGeometryStats & {
-  geometryMs: number;
-  uploadMs: number;
-  fillUploadMs: number;
-  lineUploadMs: number;
-  drawMs: number;
-  fillDrawMs: number;
-  lineDrawMs: number;
-  fillVertexCount: number;
-  lineVertexCount: number;
-};
-
-export type ThresholdProfile = {
-  threshold: number;
-} & ContourLayerStats;
-
 export type ContourLayerGeometry = {
   fillVertices: ContourVertexData | null;
   lineVertices: ContourVertexData | null;
@@ -99,7 +74,6 @@ export type ContourLayer = {
   threshold: number;
   readiness: ContourLayerReadiness;
   geometry: ContourLayerGeometry;
-  stats: ContourLayerStats;
   renderResources: ContourLayerRenderResources;
 };
 
@@ -122,29 +96,6 @@ export type WaterState = {
   renderResources: WaterRenderResources;
 };
 
-export type SceneProfile = {
-  enabled: boolean;
-  seed: number;
-  maxWorldSize: number;
-  worldSize: number;
-  cols: number;
-  rows: number;
-  totalCells: number;
-  thresholdCount: number;
-  sceneBuildMs: number;
-  elevationSampleMs: number;
-  waterDrawMs: number;
-  waterRowsDrawn: number;
-  waterPointsDrawn: number;
-  contourGeometryMs: number;
-  contourUploadMs: number;
-  contourDrawMs: number;
-  revealTotalMs: number;
-  contours: ThresholdProfile[];
-  summaryLogged: boolean;
-  startedAtMs: number;
-};
-
 export type SceneState = {
   config: SketchConfig;
   seed: number;
@@ -160,13 +111,10 @@ export type SceneState = {
   waterRow: number;
   contourIndex: number;
   phase: RenderPhase;
-  profile: SceneProfile | null;
 };
 
 declare global {
   interface Window {
-    __CONTOUR_PROFILE__?: SceneProfile;
-    __CONTOUR_PROFILE_DEBUG__?: boolean;
     __CONTOUR_CONTROLLER__?: {
       getConfig: () => SketchConfig;
       updateConfig: (patch: DeepPartial<SketchConfig>) => unknown;
