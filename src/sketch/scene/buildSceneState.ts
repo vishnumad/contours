@@ -7,6 +7,7 @@ import {
   getWorldSize,
   sampleLayeredElevation,
 } from '../terrain/elevation';
+import { createWaterState, populateWaterGeometry } from '../water/geometry';
 
 export type BuildSceneStateOptions = {
   seed: number;
@@ -20,8 +21,6 @@ export type BuildSceneStateOptions = {
   createSceneProfile: (seed: number, config: SketchConfig) => SceneProfile | null;
   exposeSceneProfile: (profile: SceneProfile | null) => void;
   createContourLayer: (threshold: number) => SceneState['contourLayers'][number];
-  createWaterState: (rows: number) => SceneState['water'];
-  populateWaterGeometry: (scene: SceneState) => void;
 };
 
 export function buildSceneState({
@@ -33,8 +32,6 @@ export function buildSceneState({
   createSceneProfile,
   exposeSceneProfile,
   createContourLayer,
-  createWaterState,
-  populateWaterGeometry,
 }: BuildSceneStateOptions): SceneState {
   const profile = createSceneProfile(seed, config);
   const sceneBuildStart = performance.now();

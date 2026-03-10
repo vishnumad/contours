@@ -18,8 +18,6 @@ import type {
   SceneProfile,
   SceneState,
   ThresholdProfile,
-  WaterRetainedBackend,
-  WaterState,
 } from './sketch/scene/types';
 import { hexToNormalizedRgba } from './sketch/shared/color';
 import { addSegment, addTriangle, emitVertices, hasContourVertices } from './sketch/shared/geometry';
@@ -32,14 +30,16 @@ import {
   toFloat32Array,
 } from './sketch/shared/math';
 import { getDerivedCamera } from './sketch/terrain/projection';
-import { getElevation, getInitialWaterRow, getSampledWaterRowCount } from './sketch/terrain/elevation';
+import { getElevation, getSampledWaterRowCount } from './sketch/terrain/elevation';
+import { disposeWaterState } from './sketch/water/geometry';
+import { createWaterRenderer } from './sketch/water/renderRetained';
 
 const sketchController = createSketchController(defaultSketchConfig);
 const renderContext = createSketchRenderContext();
+const waterRenderer = createWaterRenderer(renderContext);
 
 let scene: SceneState | null = null;
 let contourRetainedBackend: ContourRetainedBackend | null = null;
-let waterRetainedBackend: WaterRetainedBackend | null = null;
 let unsubscribeController: (() => void) | null = null;
 
 const RETAINED_CONTOUR_VERTEX_SHADER = `
@@ -57,32 +57,6 @@ precision mediump float;
 uniform vec4 uColor;
 
 void main() {
-  gl_FragColor = uColor;
-}
-`;
-
-const RETAINED_WATER_VERTEX_SHADER = `
-attribute vec3 aPosition;
-uniform mat4 uProjectionMatrix;
-uniform mat4 uModelViewMatrix;
-uniform float uPointSize;
-
-void main() {
-  gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aPosition, 1.0);
-  gl_PointSize = uPointSize;
-}
-`;
-
-const RETAINED_WATER_FRAGMENT_SHADER = `
-precision mediump float;
-uniform vec4 uColor;
-
-void main() {
-  vec2 centeredCoord = gl_PointCoord - vec2(0.5);
-  if (dot(centeredCoord, centeredCoord) > 0.25) {
-    discard;
-  }
-
   gl_FragColor = uColor;
 }
 `;
@@ -182,8 +156,6 @@ function resetScene(reseed: boolean, explicitSeed?: number) {
       createSceneProfile,
       exposeSceneProfile,
       createContourLayer,
-      createWaterState,
-      populateWaterGeometry,
     });
 
     scene = nextScene;
@@ -193,6 +165,7 @@ function resetScene(reseed: boolean, explicitSeed?: number) {
     loop();
   } catch (error) {
     destroyContourRetainedBackend();
+    waterRenderer.dispose();
     exposeSceneProfile(null);
     clear();
     background(config.colors.background);
@@ -203,18 +176,12 @@ function resetScene(reseed: boolean, explicitSeed?: number) {
 
 function drawWaterRows(currentScene: SceneState) {
   const waterStart = performance.now();
-  const retainedBackend = getWaterRetainedBackend();
-  let waterPoints = 0;
 
   push();
   applyProjection(currentScene);
   applyTerrainTransform(currentScene);
 
-  if (retainedBackend && ensureWaterRenderResources(retainedBackend, currentScene.water)) {
-    waterPoints = drawWaterRetained(retainedBackend, currentScene);
-  } else {
-    waterPoints = drawWaterImmediate(currentScene);
-  }
+  const waterPoints = waterRenderer.draw(currentScene);
 
   pop();
 
@@ -225,30 +192,6 @@ function drawWaterRows(currentScene: SceneState) {
     currentScene.profile.waterPointsDrawn += waterPoints;
     currentScene.profile.waterDrawMs += performance.now() - waterStart;
   }
-}
-
-function drawWaterImmediate(currentScene: SceneState) {
-  const { config } = currentScene;
-  const waterZ = config.contours.landThreshold * config.terrain.elevationMultiplier + config.terrain.verticalBias;
-  let waterPoints = 0;
-
-  stroke(config.colors.water);
-  strokeWeight(config.water.pointSize);
-
-  for (let row = getInitialWaterRow(currentScene.rows, config); row >= 0; row -= config.water.sampleStep) {
-    for (let col = 0; col < currentScene.cols; col += config.water.sampleStep) {
-      if (getElevation(currentScene, col, row) < config.contours.landThreshold) {
-        waterPoints += 1;
-        point(
-          col * config.terrain.spacing - currentScene.worldWidth / 2,
-          row * config.terrain.spacing - currentScene.worldHeight / 2,
-          waterZ,
-        );
-      }
-    }
-  }
-
-  return waterPoints;
 }
 
 function drawContourLayer(currentScene: SceneState, contourLayer: ContourLayer) {
@@ -614,58 +557,6 @@ function createContourLayerStats(): ContourLayerStats {
   };
 }
 
-function createWaterState(rows: number): WaterState {
-  return {
-    geometry: {
-      pointVertices: null,
-      rowSlices: Array.from({ length: rows }, () => null),
-    },
-    renderResources: {
-      points: createContourLayerResourceSlot(),
-    },
-  };
-}
-
-function populateWaterGeometry(currentScene: SceneState) {
-  const { config } = currentScene;
-  const pointVertices: number[] = [];
-  const rowSlices = currentScene.water.geometry.rowSlices;
-  const waterZ = config.contours.landThreshold * config.terrain.elevationMultiplier + config.terrain.verticalBias;
-
-  for (let row = getInitialWaterRow(currentScene.rows, config); row >= 0; row -= config.water.sampleStep) {
-    const startVertex = pointVertices.length / 3;
-
-    for (let col = 0; col < currentScene.cols; col += config.water.sampleStep) {
-      if (getElevation(currentScene, col, row) >= config.contours.landThreshold) {
-        continue;
-      }
-
-      pointVertices.push(
-        col * config.terrain.spacing - currentScene.worldWidth / 2,
-        row * config.terrain.spacing - currentScene.worldHeight / 2,
-        waterZ,
-      );
-    }
-
-    const vertexCount = pointVertices.length / 3 - startVertex;
-    rowSlices[row] = {
-      startVertex,
-      vertexCount,
-    };
-  }
-
-  currentScene.water.geometry.pointVertices = new Float32Array(pointVertices);
-}
-
-function releaseWaterCpuGeometry(water: WaterState) {
-  water.geometry.pointVertices = null;
-}
-
-function disposeWaterState(water: WaterState) {
-  releaseWaterCpuGeometry(water);
-  disposeContourLayerResourceSlot(water.renderResources.points);
-}
-
 function createContourLayerResourceSlot(): ContourLayerResourceSlot {
   return {
     handle: null,
@@ -737,16 +628,6 @@ function destroyContourRetainedBackend() {
   backend.gl.deleteProgram(backend.program);
 }
 
-function destroyWaterRetainedBackend() {
-  if (!waterRetainedBackend) {
-    return;
-  }
-
-  const backend = waterRetainedBackend;
-  waterRetainedBackend = null;
-  backend.gl.deleteProgram(backend.program);
-}
-
 function disposeSceneState(currentScene: SceneState | null) {
   if (!currentScene) {
     return;
@@ -767,7 +648,7 @@ function disposeSceneState(currentScene: SceneState | null) {
   currentScene.profile = null;
 
   destroyContourRetainedBackend();
-  destroyWaterRetainedBackend();
+  waterRenderer.dispose();
   exposeSceneProfile(null);
 }
 
@@ -950,64 +831,7 @@ function getContourRetainedBackend() {
   return contourRetainedBackend;
 }
 
-function getWaterRetainedBackend() {
-  if (waterRetainedBackend && isWaterRetainedBackendValid(waterRetainedBackend)) {
-    return waterRetainedBackend;
-  }
-
-  destroyWaterRetainedBackend();
-
-  const drawingContext = renderContext.getDrawingContext();
-  if (!isWebGLContext(drawingContext)) {
-    return null;
-  }
-
-  const gl = drawingContext;
-  const program = createWaterProgram(gl);
-  if (!program) {
-    return null;
-  }
-
-  const positionLocation = gl.getAttribLocation(program, 'aPosition');
-  const projectionMatrixLocation = gl.getUniformLocation(program, 'uProjectionMatrix');
-  const modelViewMatrixLocation = gl.getUniformLocation(program, 'uModelViewMatrix');
-  const colorLocation = gl.getUniformLocation(program, 'uColor');
-  const pointSizeLocation = gl.getUniformLocation(program, 'uPointSize');
-
-  if (
-    positionLocation < 0
-    || !projectionMatrixLocation
-    || !modelViewMatrixLocation
-    || !colorLocation
-    || !pointSizeLocation
-  ) {
-    gl.deleteProgram(program);
-    return null;
-  }
-
-  waterRetainedBackend = {
-    gl,
-    program,
-    positionLocation,
-    projectionMatrixLocation,
-    modelViewMatrixLocation,
-    colorLocation,
-    pointSizeLocation,
-  };
-
-  return waterRetainedBackend;
-}
-
 function isContourRetainedBackendValid(backend: ContourRetainedBackend) {
-  const drawingContext = renderContext.getDrawingContext();
-  if (!isWebGLContext(drawingContext) || backend.gl !== drawingContext) {
-    return false;
-  }
-
-  return typeof backend.gl.isContextLost !== 'function' || !backend.gl.isContextLost();
-}
-
-function isWaterRetainedBackendValid(backend: WaterRetainedBackend) {
   const drawingContext = renderContext.getDrawingContext();
   if (!isWebGLContext(drawingContext) || backend.gl !== drawingContext) {
     return false;
@@ -1047,44 +871,6 @@ function createContourProgram(gl: WebGLRenderingContext | WebGL2RenderingContext
 
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
     console.warn('Failed to link retained contour shader program', gl.getProgramInfoLog(program));
-    gl.deleteProgram(program);
-    return null;
-  }
-
-  return program;
-}
-
-function createWaterProgram(gl: WebGLRenderingContext | WebGL2RenderingContext) {
-  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, RETAINED_WATER_VERTEX_SHADER);
-  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, RETAINED_WATER_FRAGMENT_SHADER);
-
-  if (!vertexShader || !fragmentShader) {
-    if (vertexShader) {
-      gl.deleteShader(vertexShader);
-    }
-
-    if (fragmentShader) {
-      gl.deleteShader(fragmentShader);
-    }
-
-    return null;
-  }
-
-  const program = gl.createProgram();
-  if (!program) {
-    gl.deleteShader(vertexShader);
-    gl.deleteShader(fragmentShader);
-    return null;
-  }
-
-  gl.attachShader(program, vertexShader);
-  gl.attachShader(program, fragmentShader);
-  gl.linkProgram(program);
-  gl.deleteShader(vertexShader);
-  gl.deleteShader(fragmentShader);
-
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    console.warn('Failed to link retained water shader program', gl.getProgramInfoLog(program));
     gl.deleteProgram(program);
     return null;
   }
@@ -1151,30 +937,6 @@ function ensureContourLayerRenderResources(
     fillUploadMs,
     lineUploadMs,
   };
-}
-
-function ensureWaterRenderResources(
-  backend: WaterRetainedBackend,
-  water: WaterState,
-) {
-  const handle = water.renderResources.points.handle as ContourRenderBuffer | null;
-  if (handle) {
-    return true;
-  }
-
-  uploadContourLayerResource(
-    backend.gl,
-    water.renderResources.points,
-    water.geometry.pointVertices,
-    backend.gl.POINTS,
-  );
-
-  if (water.renderResources.points.handle) {
-    releaseWaterCpuGeometry(water);
-    return true;
-  }
-
-  return false;
 }
 
 function uploadContourLayerResource(
@@ -1327,48 +1089,6 @@ function drawContourRenderBuffer(
   gl.vertexAttribPointer(backend.positionLocation, 3, gl.FLOAT, false, 0, 0);
   gl.uniform4fv(backend.colorLocation, color);
   gl.drawArrays(handle.drawMode, 0, handle.vertexCount);
-}
-
-function drawWaterRetained(
-  backend: WaterRetainedBackend,
-  currentScene: SceneState,
-) {
-  const renderer = renderContext.getRenderer();
-  const handle = currentScene.water.renderResources.points.handle as ContourRenderBuffer | null;
-
-  if (!renderer || !handle) {
-    return 0;
-  }
-
-  const { gl } = backend;
-  const previousProgram = gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null;
-  const previousArrayBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING) as WebGLBuffer | null;
-  const wasPositionAttribEnabled = Boolean(gl.getVertexAttrib(backend.positionLocation, gl.VERTEX_ATTRIB_ARRAY_ENABLED));
-  const pointSize = Math.max(1, currentScene.config.water.pointSize * renderContext.getPixelDensity());
-
-  gl.useProgram(backend.program);
-  gl.uniformMatrix4fv(backend.projectionMatrixLocation, false, toFloat32Array(renderer.uPMatrix.mat4));
-  gl.uniformMatrix4fv(backend.modelViewMatrixLocation, false, toFloat32Array(renderer.uMVMatrix.mat4));
-  gl.uniform4fv(backend.colorLocation, hexToNormalizedRgba(currentScene.config.colors.water));
-  gl.uniform1f(backend.pointSizeLocation, pointSize);
-  gl.bindBuffer(gl.ARRAY_BUFFER, handle.buffer);
-  gl.enableVertexAttribArray(backend.positionLocation);
-  gl.vertexAttribPointer(backend.positionLocation, 3, gl.FLOAT, false, 0, 0);
-  gl.drawArrays(handle.drawMode, 0, handle.vertexCount);
-
-  if (previousArrayBuffer) {
-    gl.bindBuffer(gl.ARRAY_BUFFER, previousArrayBuffer);
-  } else {
-    gl.bindBuffer(gl.ARRAY_BUFFER, null);
-  }
-
-  if (!wasPositionAttribEnabled) {
-    gl.disableVertexAttribArray(backend.positionLocation);
-  }
-
-  gl.useProgram(previousProgram);
-
-  return handle.vertexCount;
 }
 
 function drawContourLayerImmediate(currentScene: SceneState, contourLayer: ContourLayer) {
