@@ -3,11 +3,11 @@ import type { SketchConfig } from './types';
 export const defaultSketchConfig: SketchConfig = {
   terrain: {
     spacing: 4,
-    noiseScale: 0.01,
+    noiseScale: 0.0095,
     noiseOffset: 150,
     noiseOctaves: [1, 0.5, 0.25, 0.125],
     verticalBias: 0,
-    elevationMultiplier: 525,
+    elevationMultiplier: 475,
     viewportScale: 1.2,
     minSize: 720,
     maxSize: 2000,
