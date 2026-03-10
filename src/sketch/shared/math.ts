@@ -107,7 +107,3 @@ export function binaryToDecimal(a: number, b: number, c: number, d: number, thre
 
   return aBit + bBit + cBit + dBit;
 }
-
-export function getElevationIndex(col: number, row: number, cols: number) {
-  return row * cols + col;
-}

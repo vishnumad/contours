@@ -5,6 +5,7 @@ import type { SketchControllerEvent } from './sketch/config/controller';
 import { defaultSketchConfig } from './sketch/config/defaults';
 import type { SketchCameraConfig, SketchConfig } from './sketch/config/types';
 import { createSketchRenderContext } from './sketch/runtime/renderContext';
+import { buildSceneState } from './sketch/scene/buildSceneState';
 import type {
   ContourGeometryStats,
   ContourLayer,
@@ -14,10 +15,8 @@ import type {
   ContourRenderBuffer,
   ContourRetainedBackend,
   ContourVertexData,
-  P5RendererLike,
   SceneProfile,
   SceneState,
-  TerrainScreenOffset,
   ThresholdProfile,
   WaterRetainedBackend,
   WaterState,
@@ -27,13 +26,13 @@ import { addSegment, addTriangle, emitVertices, hasContourVertices } from './ske
 import {
   binaryToDecimal,
   createContourLineTransformFromBasis,
-  getElevationIndex,
   getInterpolationPercent,
   multiplyMat4,
   projectToScreen,
   toFloat32Array,
 } from './sketch/shared/math';
-import { getDerivedCamera, getTerrainScreenOffset } from './sketch/terrain/projection';
+import { getDerivedCamera } from './sketch/terrain/projection';
+import { getElevation, getInitialWaterRow, getSampledWaterRowCount } from './sketch/terrain/elevation';
 
 const sketchController = createSketchController(defaultSketchConfig);
 const renderContext = createSketchRenderContext();
@@ -174,7 +173,18 @@ function resetScene(reseed: boolean, explicitSeed?: number) {
   disposeSceneState(previousScene);
 
   try {
-    const nextScene = buildSceneState(seed, config);
+    const nextScene = buildSceneState({
+      seed,
+      config,
+      viewportSize: renderContext.getSize(),
+      noiseSeed,
+      noise,
+      createSceneProfile,
+      exposeSceneProfile,
+      createContourLayer,
+      createWaterState,
+      populateWaterGeometry,
+    });
 
     scene = nextScene;
     applyProjection(nextScene);
@@ -189,108 +199,6 @@ function resetScene(reseed: boolean, explicitSeed?: number) {
     noLoop();
     throw error;
   }
-}
-
-function buildSceneState(seed: number, config: SketchConfig): SceneState {
-  const profile = createSceneProfile(seed, config);
-  const sceneBuildStart = performance.now();
-
-  noiseSeed(seed);
-
-  const worldSize = getWorldSize(config);
-  const cols = Math.floor(worldSize / config.terrain.spacing) + 1;
-  const rows = Math.floor(worldSize / config.terrain.spacing) + 1;
-  const elevations = new Float32Array(cols * rows);
-  let maxElevation = 0;
-  const elevationStart = performance.now();
-
-  for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < cols; col += 1) {
-      const elevation = sampleLayeredElevation(col, row, config);
-      elevations[getElevationIndex(col, row, cols)] = elevation;
-      maxElevation = Math.max(maxElevation, elevation);
-    }
-  }
-
-  if (profile) {
-    profile.elevationSampleMs = performance.now() - elevationStart;
-  }
-
-  const contourThresholds: number[] = [];
-  for (
-    let threshold = config.contours.landThreshold;
-    threshold <= maxElevation + config.contours.isolineIncrement * 0.5;
-    threshold += config.contours.isolineIncrement
-  ) {
-    contourThresholds.push(Number(threshold.toFixed(6)));
-  }
-
-  const contourLayers = contourThresholds.map((threshold) => createContourLayer(threshold));
-  const water = createWaterState(rows);
-
-  const nextScene: SceneState = {
-    config,
-    seed,
-    cols,
-    rows,
-    worldWidth: (cols - 1) * config.terrain.spacing,
-    worldHeight: (rows - 1) * config.terrain.spacing,
-    elevations,
-    maxElevation,
-    terrainScreenOffset: getTerrainScreenOffset(
-      (cols - 1) * config.terrain.spacing,
-      (rows - 1) * config.terrain.spacing,
-      config,
-    ),
-    water,
-    contourLayers,
-    waterRow: getInitialWaterRow(rows, config),
-    contourIndex: 0,
-    phase: 'water',
-    profile,
-  };
-
-  populateWaterGeometry(nextScene);
-
-  if (profile) {
-    profile.worldSize = worldSize;
-    profile.cols = cols;
-    profile.rows = rows;
-    profile.totalCells = (cols - 1) * (rows - 1);
-    profile.thresholdCount = contourLayers.length;
-    profile.sceneBuildMs = performance.now() - sceneBuildStart;
-  }
-
-  exposeSceneProfile(profile);
-
-  return nextScene;
-}
-
-function getWorldSize(config: SketchConfig) {
-  const viewportBase = Math.min(windowWidth, windowHeight);
-  const scaled = viewportBase * config.terrain.viewportScale;
-  const clamped = Math.min(Math.max(scaled, config.terrain.minSize), config.terrain.maxSize);
-  const snapped = Math.floor(clamped / config.terrain.spacing) * config.terrain.spacing;
-
-  return Math.max(snapped, config.terrain.minSize + config.terrain.padding);
-}
-
-function sampleLayeredElevation(x: number, y: number, config: SketchConfig) {
-  const [octave1Weight, octave2Weight, octave3Weight, octave4Weight] = config.terrain.noiseOctaves;
-  const octave1 = sampleNoise(x, y, config);
-  const octave2 = sampleNoise(x * 2, y * 2, config);
-  const octave3 = sampleNoise(x * 4, y * 4, config);
-  const octave4 = sampleNoise(x * 8, y * 8, config);
-  const octaveSum = octave1Weight + octave2Weight + octave3Weight + octave4Weight;
-
-  return (octave1Weight * octave1 + octave2Weight * octave2 + octave3Weight * octave3 + octave4Weight * octave4) / octaveSum;
-}
-
-function sampleNoise(x: number, y: number, config: SketchConfig) {
-  return noise(
-    x * config.terrain.noiseScale + config.terrain.noiseOffset,
-    y * config.terrain.noiseScale + config.terrain.noiseOffset,
-  );
 }
 
 function drawWaterRows(currentScene: SceneState) {
@@ -1557,20 +1465,6 @@ function createFallbackContourLineTransform(camera: SketchCameraConfig) {
   const screenBasisYY = derivedCamera.rotationZCos * derivedCamera.rotationXCos;
 
   return createContourLineTransformFromBasis(screenBasisXX, screenBasisXY, screenBasisYX, screenBasisYY);
-}
-
-function getElevation(currentScene: SceneState, col: number, row: number) {
-  return currentScene.elevations[getElevationIndex(col, row, currentScene.cols)];
-}
-
-function getInitialWaterRow(rows: number, config: SketchConfig) {
-  return rows - 1 - ((rows - 1) % config.water.sampleStep);
-}
-
-function getSampledWaterRowCount(rows: number, config: SketchConfig) {
-  const initialWaterRow = getInitialWaterRow(rows, config);
-
-  return initialWaterRow < 0 ? 0 : Math.floor(initialWaterRow / config.water.sampleStep) + 1;
 }
 
 function applyProjection(currentScene: SceneState) {
