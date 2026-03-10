@@ -3,15 +3,14 @@ import type {
   ContourLayerResourceSlot,
   ContourRenderBuffer,
   SceneState,
-  WaterRetainedBackend,
+  WaterShaderBackend,
   WaterState,
 } from '../scene/types';
 import { hexToNormalizedRgba } from '../shared/color';
 import { toFloat32Array } from '../shared/math';
 import { releaseWaterCpuGeometry } from './geometry';
-import { drawWaterImmediate } from './renderImmediate';
 
-const RETAINED_WATER_VERTEX_SHADER = `
+const WATER_VERTEX_SHADER = `
 attribute vec3 aPosition;
 uniform mat4 uProjectionMatrix;
 uniform mat4 uModelViewMatrix;
@@ -23,7 +22,7 @@ void main() {
 }
 `;
 
-const RETAINED_WATER_FRAGMENT_SHADER = `
+const WATER_FRAGMENT_SHADER = `
 precision mediump float;
 uniform vec4 uColor;
 
@@ -43,19 +42,19 @@ export type WaterRenderer = {
 };
 
 export function createWaterRenderer(renderContext: SketchRenderContext): WaterRenderer {
-  let waterRetainedBackend: WaterRetainedBackend | null = null;
+  let waterShaderBackend: WaterShaderBackend | null = null;
 
-  function destroyWaterRetainedBackend() {
-    if (!waterRetainedBackend) {
+  function destroyWaterShaderBackend() {
+    if (!waterShaderBackend) {
       return;
     }
 
-    const backend = waterRetainedBackend;
-    waterRetainedBackend = null;
+    const backend = waterShaderBackend;
+    waterShaderBackend = null;
     backend.gl.deleteProgram(backend.program);
   }
 
-  function isWaterRetainedBackendValid(backend: WaterRetainedBackend) {
+  function isWaterShaderBackendValid(backend: WaterShaderBackend) {
     const drawingContext = renderContext.getDrawingContext();
     if (!isWebGLContext(drawingContext) || backend.gl !== drawingContext) {
       return false;
@@ -64,12 +63,12 @@ export function createWaterRenderer(renderContext: SketchRenderContext): WaterRe
     return typeof backend.gl.isContextLost !== 'function' || !backend.gl.isContextLost();
   }
 
-  function getWaterRetainedBackend() {
-    if (waterRetainedBackend && isWaterRetainedBackendValid(waterRetainedBackend)) {
-      return waterRetainedBackend;
+  function getWaterShaderBackend() {
+    if (waterShaderBackend && isWaterShaderBackendValid(waterShaderBackend)) {
+      return waterShaderBackend;
     }
 
-    destroyWaterRetainedBackend();
+    destroyWaterShaderBackend();
 
     const drawingContext = renderContext.getDrawingContext();
     if (!isWebGLContext(drawingContext)) {
@@ -99,7 +98,7 @@ export function createWaterRenderer(renderContext: SketchRenderContext): WaterRe
       return null;
     }
 
-    waterRetainedBackend = {
+    waterShaderBackend = {
       gl,
       program,
       positionLocation,
@@ -109,29 +108,29 @@ export function createWaterRenderer(renderContext: SketchRenderContext): WaterRe
       pointSizeLocation,
     };
 
-    return waterRetainedBackend;
+    return waterShaderBackend;
   }
 
   return {
     draw(currentScene: SceneState) {
-      const retainedBackend = getWaterRetainedBackend();
-
-      if (retainedBackend && ensureWaterRenderResources(retainedBackend, currentScene.water)) {
-        drawWaterRetained(retainedBackend, currentScene, renderContext);
+      const shaderBackend = getWaterShaderBackend();
+      if (!shaderBackend) {
         return;
       }
 
-      drawWaterImmediate(currentScene, renderContext);
+      if (ensureWaterRenderResources(shaderBackend, currentScene.water)) {
+        drawWaterShader(shaderBackend, currentScene, renderContext);
+      }
     },
     dispose() {
-      destroyWaterRetainedBackend();
+      destroyWaterShaderBackend();
     },
   };
 }
 
 function createWaterProgram(gl: WebGLRenderingContext | WebGL2RenderingContext) {
-  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, RETAINED_WATER_VERTEX_SHADER);
-  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, RETAINED_WATER_FRAGMENT_SHADER);
+  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, WATER_VERTEX_SHADER);
+  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, WATER_FRAGMENT_SHADER);
 
   if (!vertexShader || !fragmentShader) {
     if (vertexShader) {
@@ -159,7 +158,7 @@ function createWaterProgram(gl: WebGLRenderingContext | WebGL2RenderingContext) 
   gl.deleteShader(fragmentShader);
 
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    console.warn('Failed to link retained water shader program', gl.getProgramInfoLog(program));
+    console.warn('Failed to link water shader program', gl.getProgramInfoLog(program));
     gl.deleteProgram(program);
     return null;
   }
@@ -181,7 +180,7 @@ function compileShader(
   gl.compileShader(shader);
 
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    console.warn('Failed to compile retained water shader', gl.getShaderInfoLog(shader));
+    console.warn('Failed to compile water shader', gl.getShaderInfoLog(shader));
     gl.deleteShader(shader);
     return null;
   }
@@ -190,7 +189,7 @@ function compileShader(
 }
 
 function ensureWaterRenderResources(
-  backend: WaterRetainedBackend,
+  backend: WaterShaderBackend,
   water: WaterState,
 ) {
   const handle = water.renderResources.points.handle as ContourRenderBuffer | null;
@@ -246,8 +245,8 @@ function uploadWaterRenderResource(
   };
 }
 
-function drawWaterRetained(
-  backend: WaterRetainedBackend,
+function drawWaterShader(
+  backend: WaterShaderBackend,
   currentScene: SceneState,
   renderContext: SketchRenderContext,
 ) {

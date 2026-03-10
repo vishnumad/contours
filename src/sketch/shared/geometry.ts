@@ -1,19 +1,6 @@
 import type { ContourLineTransform, ContourVertexData } from '../scene/types';
 import { screenToTerrainDeltaX, screenToTerrainDeltaY } from '../contours/lineTransform';
 
-export function emitVertices(
-  vertices: ContourVertexData | null,
-  emitVertex: (x: number, y: number, z: number) => void,
-) {
-  if (!vertices) {
-    return;
-  }
-
-  for (let index = 0; index < vertices.length; index += 3) {
-    emitVertex(vertices[index], vertices[index + 1], vertices[index + 2]);
-  }
-}
-
 export function addTriangle(
   vertices: number[],
   ax: number,

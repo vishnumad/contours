@@ -16,11 +16,10 @@ function disposeRenderResourceSlot(resourceSlot: ContourLayerResourceSlot) {
   dispose?.();
 }
 
-export function createWaterState(rows: number): WaterState {
+export function createWaterState(): WaterState {
   return {
     geometry: {
       pointVertices: null,
-      rowSlices: Array.from({ length: rows }, () => null),
     },
     renderResources: {
       points: createRenderResourceSlot(),
@@ -31,12 +30,9 @@ export function createWaterState(rows: number): WaterState {
 export function populateWaterGeometry(currentScene: SceneState) {
   const { config } = currentScene;
   const pointVertices: number[] = [];
-  const rowSlices = currentScene.water.geometry.rowSlices;
   const waterZ = config.contours.landThreshold * config.terrain.elevationMultiplier + config.terrain.verticalBias;
 
   for (let row = getInitialWaterRow(currentScene.rows, config); row >= 0; row -= config.water.sampleStep) {
-    const startVertex = pointVertices.length / 3;
-
     for (let col = 0; col < currentScene.cols; col += config.water.sampleStep) {
       if (getElevation(currentScene, col, row) >= config.contours.landThreshold) {
         continue;
@@ -49,11 +45,6 @@ export function populateWaterGeometry(currentScene: SceneState) {
       );
     }
 
-    const vertexCount = pointVertices.length / 3 - startVertex;
-    rowSlices[row] = {
-      startVertex,
-      vertexCount,
-    };
   }
 
   currentScene.water.geometry.pointVertices = new Float32Array(pointVertices);

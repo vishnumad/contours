@@ -1,11 +1,10 @@
 import { disposeContourLayerResourceSlot, markContourLayerRenderReady } from './layer';
-import { drawContourFillImmediate, drawContourLayerImmediate, drawContourLineImmediate } from './renderImmediate';
 import type { SketchRenderContext } from '../runtime/renderContext';
 import type {
   ContourLayer,
   ContourLayerResourceSlot,
   ContourRenderBuffer,
-  ContourRetainedBackend,
+  ContourShaderBackend,
   ContourVertexData,
   SceneState,
 } from '../scene/types';
@@ -13,7 +12,7 @@ import { hexToNormalizedRgba } from '../shared/color';
 import { hasContourVertices } from '../shared/geometry';
 import { toFloat32Array } from '../shared/math';
 
-const RETAINED_CONTOUR_VERTEX_SHADER = `
+const CONTOUR_VERTEX_SHADER = `
 attribute vec3 aPosition;
 uniform mat4 uProjectionMatrix;
 uniform mat4 uModelViewMatrix;
@@ -23,7 +22,7 @@ void main() {
 }
 `;
 
-const RETAINED_CONTOUR_FRAGMENT_SHADER = `
+const CONTOUR_FRAGMENT_SHADER = `
 precision mediump float;
 uniform vec4 uColor;
 
@@ -38,19 +37,19 @@ export type ContourRenderer = {
 };
 
 export function createContourRenderer(renderContext: SketchRenderContext): ContourRenderer {
-  let contourRetainedBackend: ContourRetainedBackend | null = null;
+  let contourShaderBackend: ContourShaderBackend | null = null;
 
-  function destroyContourRetainedBackend() {
-    if (!contourRetainedBackend) {
+  function destroyContourShaderBackend() {
+    if (!contourShaderBackend) {
       return;
     }
 
-    const backend = contourRetainedBackend;
-    contourRetainedBackend = null;
+    const backend = contourShaderBackend;
+    contourShaderBackend = null;
     backend.gl.deleteProgram(backend.program);
   }
 
-  function isContourRetainedBackendValid(backend: ContourRetainedBackend) {
+  function isContourShaderBackendValid(backend: ContourShaderBackend) {
     const drawingContext = renderContext.getDrawingContext();
     if (!isWebGLContext(drawingContext) || backend.gl !== drawingContext) {
       return false;
@@ -59,12 +58,12 @@ export function createContourRenderer(renderContext: SketchRenderContext): Conto
     return typeof backend.gl.isContextLost !== 'function' || !backend.gl.isContextLost();
   }
 
-  function getContourRetainedBackend() {
-    if (contourRetainedBackend && isContourRetainedBackendValid(contourRetainedBackend)) {
-      return contourRetainedBackend;
+  function getContourShaderBackend() {
+    if (contourShaderBackend && isContourShaderBackendValid(contourShaderBackend)) {
+      return contourShaderBackend;
     }
 
-    destroyContourRetainedBackend();
+    destroyContourShaderBackend();
 
     const drawingContext = renderContext.getDrawingContext();
     if (!isWebGLContext(drawingContext)) {
@@ -92,7 +91,7 @@ export function createContourRenderer(renderContext: SketchRenderContext): Conto
       return null;
     }
 
-    contourRetainedBackend = {
+    contourShaderBackend = {
       gl,
       program,
       positionLocation,
@@ -101,35 +100,34 @@ export function createContourRenderer(renderContext: SketchRenderContext): Conto
       colorLocation,
     };
 
-    return contourRetainedBackend;
+    return contourShaderBackend;
   }
 
   return {
     drawLayer(currentScene: SceneState, contourLayer: ContourLayer) {
-      const retainedBackend = getContourRetainedBackend();
-
-      if (retainedBackend) {
-        ensureContourLayerRenderResources(retainedBackend, contourLayer);
-
-        if (contourLayer.readiness === 'render-ready') {
-          drawContourFillRetained(retainedBackend, currentScene, contourLayer, renderContext);
-          drawContourLineRetained(retainedBackend, currentScene, contourLayer, renderContext);
-        } else {
-          drawContourLayerImmediate(currentScene, contourLayer, renderContext);
-        }
-      } else {
-        drawContourLayerImmediate(currentScene, contourLayer, renderContext);
+      const shaderBackend = getContourShaderBackend();
+      if (!shaderBackend) {
+        return;
       }
+
+      ensureContourLayerRenderResources(shaderBackend, contourLayer);
+
+      if (contourLayer.readiness !== 'gpu-ready') {
+        return;
+      }
+
+      drawContourFillShader(shaderBackend, currentScene, contourLayer, renderContext);
+      drawContourLineShader(shaderBackend, currentScene, contourLayer, renderContext);
     },
     dispose() {
-      destroyContourRetainedBackend();
+      destroyContourShaderBackend();
     },
   };
 }
 
 function createContourProgram(gl: WebGLRenderingContext | WebGL2RenderingContext) {
-  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, RETAINED_CONTOUR_VERTEX_SHADER);
-  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, RETAINED_CONTOUR_FRAGMENT_SHADER);
+  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, CONTOUR_VERTEX_SHADER);
+  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, CONTOUR_FRAGMENT_SHADER);
 
   if (!vertexShader || !fragmentShader) {
     if (vertexShader) {
@@ -157,7 +155,7 @@ function createContourProgram(gl: WebGLRenderingContext | WebGL2RenderingContext
   gl.deleteShader(fragmentShader);
 
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    console.warn('Failed to link retained contour shader program', gl.getProgramInfoLog(program));
+    console.warn('Failed to link contour shader program', gl.getProgramInfoLog(program));
     gl.deleteProgram(program);
     return null;
   }
@@ -179,7 +177,7 @@ function compileShader(
   gl.compileShader(shader);
 
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    console.warn('Failed to compile retained contour shader', gl.getShaderInfoLog(shader));
+    console.warn('Failed to compile contour shader', gl.getShaderInfoLog(shader));
     gl.deleteShader(shader);
     return null;
   }
@@ -188,7 +186,7 @@ function compileShader(
 }
 
 function ensureContourLayerRenderResources(
-  backend: ContourRetainedBackend,
+  backend: ContourShaderBackend,
   contourLayer: ContourLayer,
 ) {
   if (contourLayer.readiness !== 'geometry-ready') {
@@ -251,15 +249,14 @@ function uploadContourLayerResource(
   };
 }
 
-function drawContourFillRetained(
-  backend: ContourRetainedBackend,
+function drawContourFillShader(
+  backend: ContourShaderBackend,
   currentScene: SceneState,
   contourLayer: ContourLayer,
   renderContext: SketchRenderContext,
 ) {
   const renderer = renderContext.getRenderer();
   if (!renderer) {
-    drawContourFillImmediate(currentScene, contourLayer, renderContext);
     return;
   }
 
@@ -280,8 +277,6 @@ function drawContourFillRetained(
 
   if (fillHandle) {
     drawContourRenderBuffer(backend, fillHandle, hexToNormalizedRgba(currentScene.config.colors.background));
-  } else {
-    drawContourFillImmediate(currentScene, contourLayer, renderContext);
   }
 
   if (previousArrayBuffer) {
@@ -301,15 +296,14 @@ function drawContourFillRetained(
   }
 }
 
-function drawContourLineRetained(
-  backend: ContourRetainedBackend,
+function drawContourLineShader(
+  backend: ContourShaderBackend,
   currentScene: SceneState,
   contourLayer: ContourLayer,
   renderContext: SketchRenderContext,
 ) {
   const renderer = renderContext.getRenderer();
   if (!renderer) {
-    drawContourLineImmediate(currentScene, contourLayer, renderContext);
     return;
   }
 
@@ -330,8 +324,6 @@ function drawContourLineRetained(
 
   if (lineHandle) {
     drawContourRenderBuffer(backend, lineHandle, hexToNormalizedRgba(currentScene.config.colors.outline));
-  } else {
-    drawContourLineImmediate(currentScene, contourLayer, renderContext);
   }
 
   if (previousArrayBuffer) {
@@ -352,7 +344,7 @@ function drawContourLineRetained(
 }
 
 function drawContourRenderBuffer(
-  backend: ContourRetainedBackend,
+  backend: ContourShaderBackend,
   handle: ContourRenderBuffer,
   color: [number, number, number, number],
 ) {

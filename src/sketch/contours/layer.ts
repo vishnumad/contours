@@ -45,7 +45,7 @@ export function releaseContourLayerCpuGeometry(contourLayer: ContourLayer) {
 }
 
 export function markContourLayerRenderReady(contourLayer: ContourLayer) {
-  contourLayer.readiness = 'render-ready';
+  contourLayer.readiness = 'gpu-ready';
   releaseContourLayerCpuGeometry(contourLayer);
 }
 

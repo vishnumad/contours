@@ -3,7 +3,6 @@ import type { SceneState } from './types';
 import { getTerrainScreenOffset } from '../terrain/projection';
 import {
   getElevationIndex,
-  getInitialWaterRow,
   getWorldSize,
   sampleLayeredElevation,
 } from '../terrain/elevation';
@@ -61,7 +60,7 @@ export function buildSceneState({
 
   const contourThresholds = createContourThresholds(maxElevation, config);
   const contourLayers = contourThresholds.map((threshold) => createContourLayer(threshold));
-  const water = createWaterState(rows);
+  const water = createWaterState();
 
   const nextScene: SceneState = {
     config,
@@ -79,7 +78,6 @@ export function buildSceneState({
     ),
     water,
     contourLayers,
-    waterRow: getInitialWaterRow(rows, config),
     contourIndex: 0,
     phase: 'water',
   };

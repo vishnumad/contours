@@ -7,7 +7,7 @@ import {
 } from './sketch/contours/layer';
 import { createContourLineTransform } from './sketch/contours/lineTransform';
 import { collectCellGeometry } from './sketch/contours/marchingSquares';
-import { createContourRenderer } from './sketch/contours/renderRetained';
+import { createContourRenderer } from './sketch/contours/renderShader';
 import { createSketchController } from './sketch/config/controller';
 import type { SketchControllerEvent } from './sketch/config/controller';
 import { defaultSketchConfig } from './sketch/config/defaults';
@@ -15,7 +15,7 @@ import { createSketchRenderContext } from './sketch/runtime/renderContext';
 import { buildSceneState } from './sketch/scene/buildSceneState';
 import type { ContourLayer, SceneState } from './sketch/scene/types';
 import { disposeWaterState } from './sketch/water/geometry';
-import { createWaterRenderer } from './sketch/water/renderRetained';
+import { createWaterRenderer } from './sketch/water/renderShader';
 
 const sketchController = createSketchController(defaultSketchConfig);
 const renderContext = createSketchRenderContext();
@@ -25,7 +25,11 @@ const waterRenderer = createWaterRenderer(renderContext);
 let scene: SceneState | null = null;
 let unsubscribeController: (() => void) | null = null;
 
-exposeSketchController();
+window.__CONTOUR_CONTROLLER__ = {
+  getConfig: () => sketchController.getConfig(),
+  updateConfig: (patch) => sketchController.updateConfig(patch),
+  reset: (options) => sketchController.reset(options),
+};
 
 function setup() {
   const root = document.querySelector<HTMLDivElement>('#app');
@@ -48,11 +52,6 @@ function draw() {
   }
 
   if (scene.phase === 'water') {
-    if (scene.waterRow < 0) {
-      scene.phase = 'contours';
-      return;
-    }
-
     drawWaterRows(scene);
     scene.phase = 'contours';
 
@@ -90,20 +89,16 @@ function keyPressed() {
 
 function handleControllerEvent(event: SketchControllerEvent) {
   if (event.type === 'config') {
-    applyConfigChange(event);
+    if (event.invalidation.scope === 'none') {
+      return;
+    }
+
+    resetScene(false, scene?.seed ?? Date.now());
     return;
   }
 
   const seed = event.options.reseed ? event.options.seed : scene?.seed ?? event.options.seed;
   resetScene(event.options.reseed, seed);
-}
-
-function applyConfigChange(event: Extract<SketchControllerEvent, { type: 'config' }>) {
-  if (event.invalidation.scope === 'none') {
-    return;
-  }
-
-  resetScene(false, scene?.seed ?? Date.now());
 }
 
 function drawWaterRows(currentScene: SceneState) {
@@ -114,8 +109,6 @@ function drawWaterRows(currentScene: SceneState) {
   waterRenderer.draw(currentScene);
 
   pop();
-
-  currentScene.waterRow = -1;
 }
 
 function resetScene(reseed: boolean, explicitSeed?: number) {
@@ -197,27 +190,12 @@ function disposeSceneState(currentScene: SceneState | null) {
   }
 
   currentScene.elevations = new Float32Array(0);
-  currentScene.water.geometry.rowSlices = [];
   currentScene.contourLayers = [];
-  currentScene.waterRow = -1;
   currentScene.contourIndex = 0;
   currentScene.phase = 'complete';
 
   contourRenderer.dispose();
   waterRenderer.dispose();
-}
-
-function exposeSketchController() {
-  if (!import.meta.env.DEV) {
-    delete window.__CONTOUR_CONTROLLER__;
-    return;
-  }
-
-  window.__CONTOUR_CONTROLLER__ = {
-    getConfig: () => sketchController.getConfig(),
-    updateConfig: (patch) => sketchController.updateConfig(patch),
-    reset: (options) => sketchController.reset(options),
-  };
 }
 
 function applyProjection(currentScene: SceneState) {

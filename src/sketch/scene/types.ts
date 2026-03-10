@@ -1,7 +1,7 @@
 import type { DeepPartial, SketchConfig } from '../config/types';
 
 export type RenderPhase = 'water' | 'contours' | 'complete';
-export type ContourLayerReadiness = 'pending' | 'geometry-ready' | 'render-ready' | 'disposed';
+export type ContourLayerReadiness = 'pending' | 'geometry-ready' | 'gpu-ready' | 'disposed';
 
 export type ContourVertexData = number[] | Float32Array;
 
@@ -21,7 +21,7 @@ export type ContourRenderBuffer = {
   drawMode: number;
 };
 
-export type ContourRetainedBackend = {
+export type ContourShaderBackend = {
   gl: WebGLRenderingContext | WebGL2RenderingContext;
   program: WebGLProgram;
   positionLocation: number;
@@ -30,7 +30,7 @@ export type ContourRetainedBackend = {
   colorLocation: WebGLUniformLocation;
 };
 
-export type WaterRetainedBackend = {
+export type WaterShaderBackend = {
   gl: WebGLRenderingContext | WebGL2RenderingContext;
   program: WebGLProgram;
   positionLocation: number;
@@ -77,14 +77,8 @@ export type ContourLayer = {
   renderResources: ContourLayerRenderResources;
 };
 
-export type WaterRowSlice = {
-  startVertex: number;
-  vertexCount: number;
-};
-
 export type WaterGeometry = {
   pointVertices: Float32Array | null;
-  rowSlices: Array<WaterRowSlice | null>;
 };
 
 export type WaterRenderResources = {
@@ -108,7 +102,6 @@ export type SceneState = {
   terrainScreenOffset: TerrainScreenOffset;
   water: WaterState;
   contourLayers: ContourLayer[];
-  waterRow: number;
   contourIndex: number;
   phase: RenderPhase;
 };
