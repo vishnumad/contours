@@ -32,10 +32,7 @@ window.__CONTOUR_CONTROLLER__ = {
 };
 
 function setup() {
-  const root = document.querySelector<HTMLDivElement>('#app');
-  const canvas = createCanvas(windowWidth, windowHeight, WEBGL);
-
-  canvas.parent(root!);
+  createCanvas(windowWidth, windowHeight, WEBGL);
   pixelDensity(Math.min(window.devicePixelRatio || 1, 2));
   smooth();
   strokeCap(ROUND);
@@ -210,4 +207,5 @@ function applyTerrainTransform(currentScene: SceneState) {
   rotateZ(currentScene.config.camera.rotationZ);
 }
 
-initP5({ setup, draw, windowResized, keyPressed });
+const root = document.querySelector<HTMLDivElement>('#app');
+initP5({ setup, draw, windowResized, keyPressed }, root!);
