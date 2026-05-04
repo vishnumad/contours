@@ -22,6 +22,8 @@ const renderContext = createSketchRenderContext();
 const contourRenderer = createContourRenderer(renderContext);
 const waterRenderer = createWaterRenderer(renderContext);
 
+const prerenderEntireScene = getQueryBooleanParam('prerender');
+
 let scene: SceneState | null = null;
 let unsubscribeController: (() => void) | null = null;
 
@@ -48,28 +50,15 @@ function draw() {
     return;
   }
 
-  if (scene.phase === 'water') {
-    drawWaterRows(scene);
-    scene.phase = 'contours';
+  if (prerenderEntireScene) {
+    while (renderSceneStep(scene)) {
+      // Drain all pending render work in a single draw call.
+    }
 
     return;
   }
 
-  if (scene.phase === 'contours') {
-    if (scene.contourIndex >= scene.contourLayers.length) {
-      scene.phase = 'complete';
-      noLoop();
-      return;
-    }
-
-    drawContourLayer(scene, scene.contourLayers[scene.contourIndex]);
-    scene.contourIndex += 1;
-
-    if (scene.contourIndex >= scene.contourLayers.length) {
-      scene.phase = 'complete';
-      noLoop();
-    }
-  }
+  renderSceneStep(scene);
 }
 
 function windowResized() {
@@ -106,6 +95,36 @@ function drawWaterRows(currentScene: SceneState) {
   waterRenderer.draw(currentScene);
 
   pop();
+}
+
+function renderSceneStep(currentScene: SceneState): boolean {
+  if (currentScene.phase === 'water') {
+    drawWaterRows(currentScene);
+    currentScene.phase = 'contours';
+    return true;
+  }
+
+  if (currentScene.phase !== 'contours') {
+    noLoop();
+    return false;
+  }
+
+  if (currentScene.contourIndex >= currentScene.contourLayers.length) {
+    currentScene.phase = 'complete';
+    noLoop();
+    return false;
+  }
+
+  drawContourLayer(currentScene, currentScene.contourLayers[currentScene.contourIndex]);
+  currentScene.contourIndex += 1;
+
+  if (currentScene.contourIndex >= currentScene.contourLayers.length) {
+    currentScene.phase = 'complete';
+    noLoop();
+    return false;
+  }
+
+  return true;
 }
 
 function resetScene(reseed: boolean, explicitSeed?: number) {
@@ -205,6 +224,16 @@ function applyTerrainTransform(currentScene: SceneState) {
   translate(-currentScene.terrainScreenOffset.x, -currentScene.terrainScreenOffset.y, 0);
   rotateX(currentScene.config.camera.rotationX);
   rotateZ(currentScene.config.camera.rotationZ);
+}
+
+function getQueryBooleanParam(name: string): boolean {
+  const value = new URLSearchParams(window.location.search).get(name);
+
+  if (value === null) {
+    return false;
+  }
+
+  return !['0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
 }
 
 const root = document.querySelector<HTMLDivElement>('#app');
